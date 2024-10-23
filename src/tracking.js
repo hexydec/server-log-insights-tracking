@@ -5,15 +5,14 @@ export default () => {
 		url = "/" + key + ".png?",
 		win = window,
 		doc = document,
-		robot = win.callPhantom || win._phantom || win.phantom || win.__nightmare || navigator.webdriver || doc.__selenium_unwrapped || doc.__webdriver_evaluate || doc.__driver_evaluate;
-		params = {e: "pageview", u: id, w: screen.width, h: screen.height, l: navigator.language, v: robot ? "robot" : "human"},
-		geturl = params => url + (new URLSearchParams(params)).toString(),
-		id = localStorage.getItem(key);
+		robot = win.callPhantom || win._phantom || win.phantom || win.__nightmare || navigator.webdriver || doc.__selenium_unwrapped || doc.__webdriver_evaluate || doc.__driver_evaluate,
+		params = {e: "pageview", u: localStorage.getItem(key), w: screen.width, h: screen.height, l: navigator.language, v: robot ? "robot" : "human"},
+		geturl = params => url + (new URLSearchParams(params)).toString();
 
 	// generate random identifier
-	if (id === null) {
-		id = crypto.randomUUID();
-		localStorage.setItem(key, id);
+	if (params.u === null) {
+		params.u = crypto.randomUUID();
+		localStorage.setItem(key, params.u);
 	}
 
 	// make request so we can pick it up in the server logs
@@ -30,16 +29,19 @@ export default () => {
 		// retrieve load times
 		const observer = new PerformanceObserver((entryList) => {
 			const entry = entryList.getEntries()[0];
-			params.i = entry.responseStart - entry.navigationStart; // initial load
-			params.t = entry.domComplete - entry.navigationStart; // total load
+			params.i = entry.domInteractive; // initial load
+			params.t = entry.domComplete; // total load
 		});
-		observer.observe({entryTypes: ["navigation"]});
+		observer.observe({type: "navigation", buffered: true});
 	  
 		// send beacon when the user navigates away
 		win.addEventListener("visibilitychange", () => {
 			if (doc.visibilityState === "hidden") {
 				params.e = "navigate";
-				params.n = doc.querySelector("a[href]:focus")?.href;
+				const link = doc.querySelector("a[href]:focus");
+				if (link !== null) {
+					params.n = link.href;
+				}
 				navigator.sendBeacon(geturl(params));
 			}
 		});
