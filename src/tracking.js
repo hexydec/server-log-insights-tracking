@@ -17,17 +17,31 @@ export default () => {
 	}
 
 	// make request so we can pick it up in the server logs
-	fetch(geturl(params), {
-		method: "HEAD",
-		credentials: "omit"
-	});
+	if (new URL(document.referrer)?.hostname !== location.hostname) {
+		fetch(geturl(params), {
+			method: "HEAD",
+			credentials: "omit"
+		});
+	}
 
 	// send beacon when they leave the page
-	win.addEventListener("visibilitychange", () => {
-		if (doc.visibilityState === "hidden") {
-			params.e = "navigate";
-			params.t = doc.querySelector("a[href]:focus")?.href;
-			navigator.sendBeacon(geturl(params));
-		}
-	});
+	if ("sendBeacon" in navigator) {
+
+		// retrieve load times
+		const observer = new PerformanceObserver((entryList) => {
+			const entry = entryList.getEntries()[0];
+			params.i = entry.responseStart - entry.navigationStart; // initial load
+			params.t = entry.domComplete - entry.navigationStart; // total load
+		});
+		observer.observe({entryTypes: ["navigation"]});
+	  
+		// send beacon when the user navigates away
+		win.addEventListener("visibilitychange", () => {
+			if (doc.visibilityState === "hidden") {
+				params.e = "navigate";
+				params.n = doc.querySelector("a[href]:focus")?.href;
+				navigator.sendBeacon(geturl(params));
+			}
+		});
+	}
 };

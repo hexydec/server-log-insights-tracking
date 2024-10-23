@@ -1,0 +1,25 @@
+{
+  "name": "server-log-insights-tracking",
+  "version": "1.0.0",
+  "description": "Tracking code for use with Server Log Insights",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hexydec/server-log-insights-tracking.git"
+  },
+  "keywords": [
+    "Analytics",
+    "tracking",
+    "privacy",
+    "metrics"
+  ],
+  "author": "Hexydec",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/hexydec/server-log-insights-tracking/issues"
+  },
+  "homepage": "https://github.com/hexydec/server-log-insights-tracking#readme"
+}
