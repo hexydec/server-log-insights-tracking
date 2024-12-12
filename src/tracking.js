@@ -1,18 +1,35 @@
-export default base => {
+import robot from "./robots.js";
+
+export default async base => {
 
 	// setup variables
 	let key = "slid",
 		url = (base || "/") + key + ".json?",
-		win = window,
-		doc = document,
-		robot = win.callPhantom || win._phantom || win.phantom || win.__nightmare || navigator.webdriver || doc.__selenium_unwrapped || doc.__webdriver_evaluate || doc.__driver_evaluate,
-		params = {e: "pageview", u: localStorage.getItem(key), w: screen.width, h: screen.height, l: navigator.language, v: robot ? "robot" : "human"},
+
+		// return data
+		params = {
+			e: "pageview", // event
+			u: localStorage.getItem(key), // userid
+			w: screen.width, // width
+			h: screen.height, // height
+			l: navigator.language, // language
+			v: await robot() ? "r" : "h" // visitor
+			// n: null, // navigation - external link address
+			// d: null // duration - time on page
+		},
 		send = params => fetch(url + (new URLSearchParams(params)).toString(), {
 			method: "HEAD",
 			credentials: "omit",
 			keepalive: true
-		})
-		visible = null;
+		}),
+
+		// timing
+		visible = null,
+		observer = new PerformanceObserver(entryList => {
+			const entry = entryList.getEntries()[0];
+			params.i = entry.domInteractive; // initial load
+			params.t = entry.domComplete; // total load
+		});
 
 	// generate random identifier
 	if (params.u === null) {
@@ -26,11 +43,6 @@ export default base => {
 	}
 
 	// retrieve load times
-	const observer = new PerformanceObserver((entryList) => {
-		const entry = entryList.getEntries()[0];
-		params.i = entry.domInteractive; // initial load
-		params.t = entry.domComplete; // total load
-	});
 	observer.observe({type: "navigation", buffered: true});
 	
 	// send beacon when the user navigates away
