@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Server Log Insights: Robot Test</title>
+		<style>
+			body {
+				font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+			}
+
+			p {
+				font-size: larger;
+			}
+
+			.bot__result {
+				font-weight: bold;
+			}
+
+			.bot__result--human {
+				color: green;
+			}
+
+			.bot__result--robot {
+				color: red;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Server Log Insights: Robot Test</h1>
+		<p>Your device appears to be <span class="bot__result">Unknown</span></p>
+		<script type="module">
+			import robot from "../src/robots.js";
+			document.addEventListener("DOMContentLoaded", async () => {
+				const isrobot = await robot(),
+					target = document.getElementsByClassName("bot__result")[0];
+				target.textContent = isrobot ? "a Robot" : "Human";
+				target.classList.add("bot__result--" + (isrobot ? "robot" : "human"));
+			});
+		</script>
+	</body>
+</html>
