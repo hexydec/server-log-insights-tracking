@@ -5,7 +5,6 @@ export default () => {
 		u: navigator.userAgent,
 		l: JSON.stringify(navigator.languages),
 		h: navigator.hardwareConcurrency,
-		c: false, // chrome dev tools
 		v: null, // webgl vendor
 		r: null // webgl renderer
 	}

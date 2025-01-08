@@ -8,7 +8,7 @@ export default () => {
 			hint = nav.userAgentData?.getHighEntropyValues(["fullVersionList"]) || {},
 			robot = (win.callPhantom || win._phantom || win.phantom || win.__nightmare || nav.webdriver || doc.__selenium_unwrapped || doc.__webdriver_evaluate || doc.__driver_evaluate || win.external?.toString().includes("Sequentum") || hint.brands?.some(obj => obj.brand.includes("HeadlessChrome"))) !== undefined,
 			e = new Error(),
-			code = 'const o={u:navigator.userAgent,l:JSON.stringify(navigator.languages),h:navigator.hardwareConcurrency,c:false,v:null,r:null};try{w=(new OffscreenCanvas(1,1)).getContext("webgl"),e=w.getExtension("WEBGL_debug_renderer_info"),p={v:e.UNMASKED_VENDOR_WEBGL,r:e.UNMASKED_RENDERER_WEBGL};for(let k in p){o[k]=w.getParameter(p[k])}}catch(e){}self.postMessage(o)',
+			code = 'const o={u:navigator.userAgent,l:JSON.stringify(navigator.languages),h:navigator.hardwareConcurrency,v:null,r:null};try{w=(new OffscreenCanvas(1,1)).getContext("webgl"),e=w.getExtension("WEBGL_debug_renderer_info"),p={v:e.UNMASKED_VENDOR_WEBGL,r:e.UNMASKED_RENDERER_WEBGL};for(let k in p){o[k]=w.getParameter(p[k])}}catch(e){}self.postMessage(o)',
 			blob = new Blob([code], {type: "application/javascript"}),
 			url = URL.createObjectURL(blob);
 
