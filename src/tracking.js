@@ -13,7 +13,8 @@ export default async base => {
 			w: screen.width, // width
 			h: screen.height, // height
 			l: navigator.language, // language
-			v: await robot() ? "r" : "h" // visitor
+			v: await robot() ? "r" : "h", // visitor
+			z: Intl.DateTimeFormat().resolvedOptions().timeZone
 			// n: null, // navigation - external link address
 			// d: null // duration - time on page
 		},
