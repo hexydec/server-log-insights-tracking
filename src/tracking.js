@@ -40,7 +40,7 @@ export default async base => {
 	}
 
 	// make request so we can pick it up in the server logs
-	if (new URL(document.referrer)?.hostname !== location.hostname) {
+	if (!document.referrer || new URL(document.referrer)?.hostname !== location.hostname) {
 		send(params);
 	}
 
