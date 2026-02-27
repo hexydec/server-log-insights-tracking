@@ -8,8 +8,9 @@ export default async base => {
 
 		// return data
 		params = {
-			e: "pageview", // event
+			e: "init", // event
 			u: localStorage.getItem(key), // userid
+			s: location.href, // the current scriptname
 			w: screen.width, // width
 			h: screen.height, // height
 			l: navigator.language, // language
@@ -25,7 +26,7 @@ export default async base => {
 		}),
 
 		// timing
-		visible = null,
+		loaded = Date.now(),
 		observer = new PerformanceObserver(entryList => {
 			const entry = entryList.getEntries()[0];
 			params.i = entry.domInteractive; // initial load
@@ -45,21 +46,27 @@ export default async base => {
 
 	// retrieve load times
 	observer.observe({type: "navigation", buffered: true});
+
+	// remember which link we clicked
+	win.addEventListener("click", e => {
+		const link = e.target.closest("a");
+		if (link !== null && new URL(link)?.hostname !== location.hostname) {
+			params.n = link;
+		}
+	});
 	
 	// send beacon when the user navigates away
 	win.addEventListener("visibilitychange", () => {
+
+		// send the beacon
 		if (doc.visibilityState === "hidden") {
-			params.e = "unload";
-			const link = doc.querySelector("a[href]:focus");
-			if (link !== null) {
-				params.n = link.href;
-			}
-			if (visible !== null) {
-				params.d = Math.floor((Date.now() - visible) / 1000);
-			}
+			params.e = "navigate";
+			params.d = Math.floor((Date.now() - loaded) / 1000);
 			send(params);
+
+		// reset the start counter
 		} else if (doc.visibilityState === "visible") {
-			visible = Date.now();
+			loaded = Date.now();
 		}
 	});
 };
