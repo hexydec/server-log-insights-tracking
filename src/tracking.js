@@ -10,7 +10,7 @@ export default async base => {
 		params = {
 			e: "init", // event
 			u: localStorage.getItem(key), // userid
-			s: location.href, // the current scriptname
+			s: location.pathname + location.search, // the current scriptname
 			w: screen.width, // width
 			h: screen.height, // height
 			l: navigator.language, // language
@@ -29,9 +29,11 @@ export default async base => {
 		loaded = Date.now(),
 		observer = new PerformanceObserver(entryList => {
 			const entry = entryList.getEntries()[0];
-			params.i = entry.domInteractive; // initial load
-			params.t = entry.domComplete; // total load
-		});
+			params.i = entry.domInteractive / 1000; // initial load
+			params.t = entry.domComplete / 1000; // total load
+		}),
+		win = window,
+		doc = document;
 
 	// generate random identifier
 	if (params.u === null) {
@@ -40,7 +42,7 @@ export default async base => {
 	}
 
 	// make request so we can pick it up in the server logs
-	if (!document.referrer || new URL(document.referrer)?.hostname !== location.hostname) {
+	if (!doc.referrer || new URL(doc.referrer)?.hostname !== location.hostname) {
 		send(params);
 	}
 
