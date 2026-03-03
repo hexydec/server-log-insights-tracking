@@ -2,6 +2,7 @@
 <html>
 	<head>
 		<title>Server Log Insights: Robot Test</title>
+		<meta name="viewport" content="width=device-width,initial-scale=1.0" />
 		<style>
 			body {
 				font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -27,13 +28,46 @@
 	<body>
 		<h1>Server Log Insights: Robot Test</h1>
 		<p>Your device appears to be <span class="bot__result">Unknown</span></p>
+		<table id="table">
+			<tr>
+				<th>Test</th>
+				<th>Result</th>
+			</tr>
+		</table>
 		<script type="module">
-			import robot from "../src/robots.js";
+			import {tests} from "../src/robots.js";
 			document.addEventListener("DOMContentLoaded", async () => {
-				const isrobot = await robot(),
-					target = document.getElementsByClassName("bot__result")[0];
-				target.textContent = isrobot ? "a Robot" : "Human";
-				target.classList.add("bot__result--" + (isrobot ? "robot" : "human"));
+				const table = document.getElementById("table"),
+					proms = [],
+					keys = Object.keys(tests),
+					start = performance.now();
+				keys.forEach(key => {
+					proms.push(tests[key]());
+				});
+				Promise.all(proms).then(values => {
+					let score = 0,
+						time = performance.now() - start;
+					values.forEach((item, i) => {
+						const row = document.createElement("tr"),
+							test = document.createElement("td"),
+							result = document.createElement("td");
+						test.innerText = keys[i];
+						result.innerText = item ? "Pass" : "Fail";
+						row.appendChild(test);
+						row.appendChild(result);
+						table.appendChild(row);
+						if (item) {
+							score++;
+						}
+					});
+					const target = document.getElementsByClassName("bot__result")[0],
+						isrobot = values.some(item => !item),
+						timing = document.createElement("p");
+					target.textContent = isrobot ? "a Robot" : "Human";
+					target.classList.add("bot__result--" + (isrobot ? "robot" : "human"));
+					timing.innerText = "Completed in " + (time / 1000) + "s";
+					table.after(timing);
+				});
 			});
 		</script>
 	</body>

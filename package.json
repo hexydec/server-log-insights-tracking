@@ -1,37 +1,40 @@
 {
-  "name": "server-log-insights-tracking",
-  "version": "1.0.0",
-  "description": "Tracking code for use with Server Log Insights",
-  "main": "index.js",
-  "scripts": {},
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/hexydec/server-log-insights-tracking.git"
-  },
-  "keywords": [
-    "Analytics",
-    "tracking",
-    "privacy",
-    "metrics"
-  ],
-  "author": "Hexydec",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/hexydec/server-log-insights-tracking/issues"
-  },
-  "homepage": "https://github.com/hexydec/server-log-insights-tracking#readme",
-  "dependencies": {
-    "@rollup/plugin-node-resolve": "^16.0.3",
-    "grunt": "^1.6.1",
-    "grunt-contrib-watch": "*",
-    "grunt-rollup": "^12.0.0",
-    "grunt-terser": "^1.0.0",
-    "load-grunt-tasks": "*",
-    "rollup": "^4.59.0",
-    "terser": "^5.46.0"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.58.2",
-    "@types/node": "^25.3.2"
-  }
+	"name": "server-log-insights-tracking",
+	"version": "1.0.0",
+	"description": "Tracking code for use with Server Log Insights",
+	"main": "index.js",
+	"scripts": {
+		"test": "npx playwright test",
+		"test:nogpu": "$env:LIBGL_ALWAYS_SOFTWARE=1; npx playwright test"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/hexydec/server-log-insights-tracking.git"
+	},
+	"keywords": [
+		"Analytics",
+		"tracking",
+		"privacy",
+		"metrics"
+	],
+	"author": "Hexydec",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/hexydec/server-log-insights-tracking/issues"
+	},
+	"homepage": "https://github.com/hexydec/server-log-insights-tracking#readme",
+	"dependencies": {
+		"@rollup/plugin-node-resolve": "^16.0.3",
+		"grunt": "^1.6.1",
+		"grunt-contrib-watch": "*",
+		"grunt-rollup": "^12.0.0",
+		"grunt-terser": "^2.0.0",
+		"load-grunt-tasks": "*",
+		"rollup": "^4.59.0",
+		"terser": "^5.46.0"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.58.2",
+		"@types/node": "^25.3.3"
+	}
 }
