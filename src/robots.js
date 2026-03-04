@@ -66,7 +66,7 @@ const funcs = {
 		if (gl) {
 			const info = gl.getExtension("WEBGL_debug_renderer_info");
 			if (info) {
-				const renderer = gl.getParameter(info.UNMASKED_RENDERER_WEBGL || gl.RENDERER).toLowerCase();
+				const renderer = gl.getParameter(info.UNMASKED_RENDERER_WEBGL).toLowerCase();
 				console.log(renderer);
 				return !["software", "mesa", "swiftshader", "llvmpipe", "vmware"].some(item => renderer.includes(item));
 			}
@@ -79,12 +79,13 @@ const funcs = {
 	precision: () => {
 		if (gl) {
 			const prec = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
-			return prec.precision > 22 && prec.rangeMax > 100;
+			return prec ? prec.precision > 22 && prec.rangeMax > 100 : false;
 		}
+		return false;
 	},
 
 	// check the max texture size, as when CPU rendering, this will be low
-	textures: () => gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192,
+	textures: () => gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192 : false,
 
 	// check for tampering
 	tampering: () => {
@@ -104,11 +105,11 @@ const funcs = {
 		// illegal invocation
 		try {
 			target.call({});
-			return false;
+			return false; // no error thrown — tampered
 		} catch (e) {
 			if (e.message !== "Failed to execute 'getParameter' on 'WebGLRenderingContext': Array value is not of type 'WebGLRenderingContext'." &&
 				e.message !== "Illegal invocation") {
-				return true;
+				return false; // unexpected error message — tampered
 			}
 		}
 
@@ -128,6 +129,14 @@ const funcs = {
 		const canvas = document.createElement("canvas"),
 			context = canvas.getContext("2d"),
 			text = "abcdefghijklmnopqrstuvwxyz0123456789",
+			// first verify that the base font itself differs from a monospace fallback
+			// if they are equal, no real fonts are installed (e.g. minimal docker container)
+			checkBaseFontInstalled = (base) => {
+				context.font = "72px monospace";
+				const monoWidth = context.measureText(text).width;
+				context.font = "72px " + base;
+				return context.measureText(text).width !== monoWidth;
+			},
 			fonts = [
 				{
 					match: "windows",
@@ -155,7 +164,12 @@ const funcs = {
 					font: "Roboto"
 				},
 				{
-					match: "ios",
+					match: "iphone",
+					base: "sans-serif",
+					font: "Geeza Pro"
+				},
+				{
+					match: "ipad",
 					base: "sans-serif",
 					font: "Geeza Pro"
 				}
@@ -164,6 +178,12 @@ const funcs = {
 		// find the platform to check
 		for (let i = 0; i < fonts.length; i++) {
 			if (ua.includes(fonts[i].match)) {
+
+				// if the base font (e.g. sans-serif) renders the same as monospace,
+				// no real fonts are installed — fail immediately
+				if (!checkBaseFontInstalled(fonts[i].base)) {
+					return false;
+				}
 
 				// measure the font we want to test - 3 times to look for jitter
 				context.font = "72px " + fonts[i].base;
@@ -192,17 +212,32 @@ const funcs = {
 				blob = new Blob([code], {type: "application/javascript"}),
 				url = URL.createObjectURL(blob);
 
-			(new Worker(url)).onmessage = e => {
-				let obj = props(),
-					pass = true;
-				for (let key in obj) {
-					if (obj[key] !== e.data[key]) {
-						pass = false;
-						break;
+			try {
+				const worker = new Worker(url);
+
+				// timeout: if the worker doesn't respond within 5s, assume tampered
+				const timeout = setTimeout(() => resolve(false), 5000);
+
+				worker.onmessage = e => {
+					clearTimeout(timeout);
+					let obj = props(),
+						pass = true;
+					for (let key in obj) {
+						if (obj[key] !== e.data[key]) {
+							pass = false;
+							break;
+						}
 					}
-				}
-				resolve(pass);
-			};
+					resolve(pass);
+				};
+
+				worker.onerror = () => {
+					clearTimeout(timeout);
+					resolve(false);
+				};
+			} catch (e) {
+				resolve(false);
+			}
 		});
 	},
 

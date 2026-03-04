@@ -5,7 +5,7 @@
 # Adds: nginx to serve the test page at the expected URL path
 # =============================================================================
 
-FROM mcr.microsoft.com/playwright:v1.52.0-noble
+FROM mcr.microsoft.com/playwright:v1.58.2-noble
 
 # Install nginx for static file serving
 RUN apt-get update && \
@@ -27,8 +27,11 @@ COPY . .
 # Configure nginx to serve the project at /server-log-insights-tracking/
 COPY nginx.conf /etc/nginx/sites-available/default
 
-# Entrypoint script: start nginx, then run tests
-RUN printf '#!/bin/bash\nset -e\nnginx\necho "Nginx started — serving at http://127.0.0.1/server-log-insights-tracking/"\nexec npx playwright test "$@"\n' > /app/entrypoint.sh && \
+# Create output directory for results
+RUN mkdir -p /app/output
+
+# Entrypoint script: start nginx, run tests, write results to file
+RUN printf '#!/bin/bash\nset -e\nnginx\necho "Nginx started — serving at http://127.0.0.1/server-log-insights-tracking/"\nnpx playwright test "$@" 2>&1 | tee /app/output/test-results.txt\nexit ${PIPESTATUS[0]}\n' > /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]

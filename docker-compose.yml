@@ -7,9 +7,12 @@ services:
     shm_size: "1gb"
     environment:
       - CI=true
+    volumes:
+      - ./output:/app/output
     # Override entrypoint args to customise which tests run
     # e.g.  docker compose run tests --grep "spoof"
     # Default: runs all tests in e2e/
+    # Results are written to ./output/test-results.txt
 
   # ---------- Serve the test page only (no test runner) ----------
   serve:
