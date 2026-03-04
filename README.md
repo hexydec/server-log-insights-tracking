@@ -114,3 +114,45 @@ npx playwright test -g "Default stealth"
 # Run all adversarial tests (spoof + stealth)
 npx playwright test e2e/spoof.test.js e2e/stealth.test.js
 ```
+
+## Docker
+
+Run the full test suite inside a Docker container with all browser dependencies pre-installed — no local setup required.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+
+### Run all E2E tests
+
+```bash
+docker compose run --rm tests
+```
+
+Pass extra Playwright CLI args after the service name:
+
+```bash
+# Only spoof tests
+docker compose run --rm tests e2e/spoof.test.js
+
+# Grep for a single test
+docker compose run --rm tests --grep "Human bypass"
+```
+
+### Serve the test page locally
+
+Start an nginx container that serves the project files on port 8080:
+
+```bash
+docker compose up serve
+```
+
+Then open: [http://localhost:8080/server-log-insights-tracking/tests/robot.html](http://localhost:8080/server-log-insights-tracking/tests/robot.html)
+
+### Rebuild the image
+
+After changing source files or dependencies:
+
+```bash
+docker compose build
+```
