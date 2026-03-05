@@ -1,0 +1,21 @@
+services:
+  # ---------- Run all Playwright + Puppeteer E2E tests ----------
+  tests:
+    build: .
+    container_name: slid-tests
+    # Tests need shared-memory for Chromium (default 64 MB is too low)
+    shm_size: "1gb"
+    environment:
+      - CI=true
+    # Override entrypoint args to customise which tests run
+    # e.g.  docker compose run tests --grep "spoof"
+    # Default: runs all tests in e2e/
+
+  # ---------- Serve the test page only (no test runner) ----------
+  serve:
+    build: .
+    container_name: slid-serve
+    ports:
+      - "8080:80"
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    # Browse to http://localhost:8080/server-log-insights-tracking/tests/robot.html

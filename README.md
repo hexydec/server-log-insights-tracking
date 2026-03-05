@@ -87,3 +87,72 @@ npx playwright test e2e/spoof.test.js --headed
 - **Tests 1–20 fail** → The spoofing bypassed detection — a security vulnerability that should be investigated and patched.
 - **Test 21 passes** → The bot successfully fooled all detection checks. This reveals which combination of evasions can defeat the current detection suite.
 - **Test 21 fails** → The detection is robust enough to catch even a fully-equipped stealth bot. This is the ideal outcome.
+
+### Puppeteer Stealth Plugin Tests
+
+The `e2e/stealth.test.js` file adds a second layer of adversarial testing using [puppeteer-extra-plugin-stealth](https://www.npmjs.com/package/puppeteer-extra-plugin-stealth) — the most widely-used bot evasion toolkit. Since the plugin is Puppeteer-only, these tests launch a separate Puppeteer browser instance (managed by Playwright's test runner) with the stealth plugin applied.
+
+Each test uses a different **stealth profile** that combines the plugin's built-in evasions with additional manual overrides:
+
+| Profile | What it does | Why it matters |
+|---------|-------------|----------------|
+| **A: Default stealth** | Applies every built-in stealth plugin evasion (webdriver, chrome.runtime, iframe contentWindow, navigator.plugins, etc.) with no customisation. | Tests the most common out-of-the-box bot toolkit configuration. |
+| **B: Stealth + GPU flags** | All stealth evasions plus Chromium GPU flags (`--use-gl=angle`, `--use-angle=d3d11`, `--ignore-gpu-blocklist`). | The stealth plugin doesn't address WebGL checks. GPU flags attempt to get a real GPU renderer, bypassing accelerated/precision/textures checks natively. |
+| **C: Stealth + RTT/audio** | All stealth evasions plus manual overrides for `navigator.connection.rtt` and `mediaDevices.enumerateDevices()`. | The stealth plugin doesn't override RTT or audio devices — two checks that headless Chrome always fails. |
+| **D: Full stealth (kitchen sink)** | Stealth plugin + GPU flags + RTT/audio overrides + conditional WebGL Proxy with `get`/`apply`/`construct` traps + Worker interception. | The maximum evasion configuration. Tests whether the detection can survive a fully-equipped attacker using the stealth plugin as a base. |
+| **E: Stealth headed mode** | Stealth plugin with a visible (non-headless) browser window plus `--disable-blink-features=AutomationControlled`. | A headed browser naturally passes many checks (UA, WebGL, audio). Tests whether the stealth plugin handles the remaining webdriver/automation markers in headed mode. |
+
+All stealth tests **expect `"a Robot"`** — they pass when the detection catches the bot despite the evasion. If a test fails, the stealth profile successfully bypassed detection, revealing a vulnerability.
+
+```bash
+# Run all stealth plugin tests
+npx playwright test e2e/stealth.test.js
+
+# Run a specific profile
+npx playwright test -g "Default stealth"
+
+# Run all adversarial tests (spoof + stealth)
+npx playwright test e2e/spoof.test.js e2e/stealth.test.js
+```
+
+## Docker
+
+Run the full test suite inside a Docker container with all browser dependencies pre-installed — no local setup required.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+
+### Run all E2E tests
+
+```bash
+docker compose run --rm tests
+```
+
+Pass extra Playwright CLI args after the service name:
+
+```bash
+# Only spoof tests
+docker compose run --rm tests e2e/spoof.test.js
+
+# Grep for a single test
+docker compose run --rm tests --grep "Human bypass"
+```
+
+### Serve the test page locally
+
+Start an nginx container that serves the project files on port 8080:
+
+```bash
+docker compose up serve
+```
+
+Then open: [http://localhost:8080/server-log-insights-tracking/tests/robot.html](http://localhost:8080/server-log-insights-tracking/tests/robot.html)
+
+### Rebuild the image
+
+After changing source files or dependencies:
+
+```bash
+docker compose build
+```
