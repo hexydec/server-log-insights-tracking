@@ -64,10 +64,9 @@ const funcs = {
 	// check the name of the graphics renderer is not a software renderer
 	accelerated: () => {
 		if (gl) {
-			const info = gl.getExtension("WEBGL_debug_renderer_info");
-			if (info) {
-				const renderer = gl.getParameter(info.UNMASKED_RENDERER_WEBGL || gl.RENDERER).toLowerCase();
-				console.log(renderer);
+			const info = gl.RENDERER ? null : gl.getExtension("WEBGL_debug_renderer_info");
+			if (info !== null || gl.RENDERER) {
+				const renderer = gl.getParameter(gl.RENDERER || info.UNMASKED_RENDERER_WEBGL).toLowerCase();
 				return !["software", "mesa", "swiftshader", "llvmpipe", "vmware"].some(item => renderer.includes(item));
 			}
 			return true;
@@ -91,9 +90,12 @@ const funcs = {
 		const proto = WebGLRenderingContext.prototype,
 			target = proto.getParameter;
 
+		// Native getParameter should not have a prototype property
+		if (Object.prototype.hasOwnProperty.call(target, "prototype")) {
+			return false;
+
 		// native code string check
-		if (target.toString().replace(/[\n\r\t ]+/g, " ") !== 'function getParameter() { [native code] }') {
-			console.log(target.toString().replace(/[\n\r\t ]+/g, " "));
+		} else if (target.toString().replace(/[\n\r\t ]+/g, " ") !== 'function getParameter() { [native code] }') {
 			return false;
 
 		// prototype check
@@ -106,9 +108,13 @@ const funcs = {
 			target.call({});
 			return false;
 		} catch (e) {
-			if (e.message !== "Failed to execute 'getParameter' on 'WebGLRenderingContext': Array value is not of type 'WebGLRenderingContext'." &&
-				e.message !== "Illegal invocation") {
-				return true;
+			const strings = [
+				"'getParameter' called on an object that does not implement interface WebGLRenderingContext.",
+				"Failed to execute 'getParameter' on 'WebGLRenderingContext': Object value is not of type 'WebGLRenderingContext'.",
+				"Illegal invocation"
+			];
+			if (!strings.includes(e.message)) {
+				return false;
 			}
 		}
 
@@ -119,6 +125,11 @@ const funcs = {
 			if (e.message.includes("is not a constructor") === false) {
 				return false;
 			}
+		}
+		
+		// check if navigator.connection has been overwritten
+		if (navigator.connection && !(navigator.connection instanceof NetworkInformation)) {
+			return false;
 		}
 		return true;
 	},
@@ -188,7 +199,7 @@ const funcs = {
 	// check that worker meta data matches the main machine
 	worker: () => {
 		return new Promise(resolve => {
-			const code = 'const o={u:navigator.userAgent,l:JSON.stringify(navigator.languages),h:navigator.hardwareConcurrency,v:null,r:null};try{w=(new OffscreenCanvas(1,1)).getContext("webgl"),e=w.getExtension("WEBGL_debug_renderer_info"),p={v:e.UNMASKED_VENDOR_WEBGL,r:e.UNMASKED_RENDERER_WEBGL};for(let k in p){o[k]=w.getParameter(p[k])}}catch(e){}self.postMessage(o)',
+			const code = 'const o={u:navigator.userAgent,l:JSON.stringify(navigator.languages),h:navigator.hardwareConcurrency,v:null,r:null};try{w=(new OffscreenCanvas(1,1)).getContext("webgl"),e= w.RENDERER?null:w.getExtension("WEBGL_debug_renderer_info"),p={v:w.VENDOR||e.UNMASKED_VENDOR_WEBGL,r:w.RENDERER||e.UNMASKED_RENDERER_WEBGL};for(let k in p){o[k]=w.getParameter(p[k])}}catch(e){}self.postMessage(o)',
 				blob = new Blob([code], {type: "application/javascript"}),
 				url = URL.createObjectURL(blob);
 

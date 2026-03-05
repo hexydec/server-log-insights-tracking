@@ -14,8 +14,8 @@ export default () => {
 
 		// set variables,
 		const webgl = (new OffscreenCanvas(1, 1)).getContext("webgl"),
-			ext = webgl.getExtension("WEBGL_debug_renderer_info"),
-			props = {v: ext.UNMASKED_VENDOR_WEBGL, r: ext.UNMASKED_RENDERER_WEBGL};
+			ext = webgl.RENDERER ? null : webgl.getExtension("WEBGL_debug_renderer_info"),
+			props = {v: webgl.VENDOR || ext.UNMASKED_VENDOR_WEBGL, r: webgl.RENDERER || ext.UNMASKED_RENDERER_WEBGL};
 
 		// get graphics driver
 		for (let key in props) {
