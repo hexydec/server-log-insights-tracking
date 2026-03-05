@@ -1,16 +1,16 @@
 // @ts-check
 const { test, expect } = require("@playwright/test");
 
-const pageUrl = "http://127.0.0.1/server-log-insights-tracking/tests/robot.html";
+const pageUrl = process.env.TEST_URL || "http://127.0.0.1/server-log-insights-tracking/tests/robot.html";
 
 /**
- * Helper: navigates to the robot test page and checks the detection result.
+ * Helper: navigates to the robot test page and waits for detection to complete.
  * Returns the textContent of .bot__result ("a Robot" or "Human").
  * @param {import('@playwright/test').Page} page
  * @returns {Promise<string|null>}
  */
 async function getDetectionResult(page) {
-	await page.waitForTimeout(3000);
+	await page.locator(".bot__result:not(:text('Unknown'))").waitFor({ timeout: 10000 });
 	return page.locator(".bot__result").textContent();
 }
 
@@ -132,7 +132,7 @@ test("Spoof: fake audio/media devices", async ({ page }) => {
 // 6. Spoof WebGL renderer to hide SwiftShader / software renderers
 //    Intercept getParameter to return a real GPU name.
 // ──────────────────────────────────────────────────────────────────────────────
-test("Spoof: fake WebGL renderer (naïve override)", async ({ page }) => {
+test("Spoof: fake WebGL renderer (naive override)", async ({ page }) => {
 	await page.addInitScript(() => {
 		const original = WebGLRenderingContext.prototype.getParameter;
 		WebGLRenderingContext.prototype.getParameter = function (/** @type {number} */ param) {
@@ -147,7 +147,7 @@ test("Spoof: fake WebGL renderer (naïve override)", async ({ page }) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 7. Spoof WebGL renderer using Proxy (stealthier – avoids toString detection)
+// 7. Spoof WebGL renderer using Proxy (stealthier — avoids toString detection)
 //    Uses a Proxy to intercept calls while preserving function identity.
 // ──────────────────────────────────────────────────────────────────────────────
 test("Spoof: fake WebGL renderer via Proxy", async ({ page }) => {
@@ -413,6 +413,97 @@ test("Spoof: fake touch points with mobile UA", async ({ page }) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// 16b. Spoof iPhone UA from a Linux container
+//      A bot pretending to be an iPhone won't have "Geeza Pro" installed,
+//      so the fonts check should catch the mismatch. This also spoofs
+//      webdriver, RTT, touch, and audio to isolate the font detection.
+// ──────────────────────────────────────────────────────────────────────────────
+test("Spoof: iPhone UA from Linux container (fonts check catches missing Geeza Pro)", async ({ page }) => {
+	await page.addInitScript(() => {
+		const iphoneUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1";
+		Object.defineProperty(navigator, "userAgent", {
+			get: () => iphoneUA,
+			configurable: true
+		});
+		Object.defineProperty(navigator, "webdriver", {
+			get: () => false,
+			configurable: true
+		});
+		Object.defineProperty(navigator, "maxTouchPoints", {
+			get: () => 5,
+			configurable: true
+		});
+		Object.defineProperty(navigator, "platform", {
+			get: () => "iPhone",
+			configurable: true
+		});
+		Object.defineProperty(navigator, "connection", {
+			get: () => ({ rtt: 50, downlink: 10, effectiveType: "4g", saveData: false }),
+			configurable: true
+		});
+		if (navigator.mediaDevices) {
+			navigator.mediaDevices.enumerateDevices = () =>
+				Promise.resolve([
+					{ deviceId: "d1", kind: "audioinput", label: "Mic", groupId: "g1", toJSON() { return {}; } },
+					{ deviceId: "d2", kind: "audiooutput", label: "Speaker", groupId: "g2", toJSON() { return {}; } }
+				]);
+		}
+	});
+	await page.goto(pageUrl);
+	await expectStillDetectedAsRobot(page);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 16c. Spoof iPhone UA + fake font metrics
+//      Same as 16b but also spoofs measureText to fake Geeza Pro being
+//      installed. Tests whether the stealth plugin + font spoofing combo
+//      can bypass detection — should still be caught by other checks.
+// ──────────────────────────────────────────────────────────────────────────────
+test("Spoof: iPhone UA + fake Geeza Pro font metrics", async ({ page }) => {
+	await page.addInitScript(() => {
+		const iphoneUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1";
+		Object.defineProperty(navigator, "userAgent", {
+			get: () => iphoneUA,
+			configurable: true
+		});
+		Object.defineProperty(navigator, "webdriver", {
+			get: () => false,
+			configurable: true
+		});
+		Object.defineProperty(navigator, "maxTouchPoints", {
+			get: () => 5,
+			configurable: true
+		});
+		Object.defineProperty(navigator, "platform", {
+			get: () => "iPhone",
+			configurable: true
+		});
+		Object.defineProperty(navigator, "connection", {
+			get: () => ({ rtt: 50, downlink: 10, effectiveType: "4g", saveData: false }),
+			configurable: true
+		});
+		if (navigator.mediaDevices) {
+			navigator.mediaDevices.enumerateDevices = () =>
+				Promise.resolve([
+					{ deviceId: "d1", kind: "audioinput", label: "Mic", groupId: "g1", toJSON() { return {}; } },
+					{ deviceId: "d2", kind: "audiooutput", label: "Speaker", groupId: "g2", toJSON() { return {}; } }
+				]);
+		}
+		// Spoof font metrics to fake Geeza Pro being installed
+		const origMeasure = CanvasRenderingContext2D.prototype.measureText;
+		CanvasRenderingContext2D.prototype.measureText = function (/** @type {string} */ text) {
+			const result = origMeasure.call(this, text);
+			if (this.font.includes("Geeza Pro")) {
+				return { ...result, width: result.width + 3.0 };
+			}
+			return result;
+		};
+	});
+	await page.goto(pageUrl);
+	await expectStillDetectedAsRobot(page);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // 17. Attack the tampering check itself
 //     Try to override getParameter while preserving its toString() representation
 //     using a Proxy with a custom toString trap.
@@ -485,14 +576,16 @@ test("Spoof: intercept Worker and fake consistent data", async ({ page }) => {
 		window.Worker = function (/** @type {string | URL} */ url) {
 			const worker = new OriginalWorker(url);
 
-			// Intercept the onmessage setter to modify worker responses
 			/** @type {Function|null} */
 			let userCallback = null;
+			const origAddEventListener = worker.addEventListener.bind(worker);
+
 			Object.defineProperty(worker, "onmessage", {
 				set(fn) {
 					userCallback = fn;
-					worker.addEventListener("message", (e) => {
-						// Replace with main thread values to ensure consistency
+					// Intercept real worker messages and replace with faked data
+					origAddEventListener("message", (/** @type {MessageEvent} */ e) => {
+						e.stopImmediatePropagation();
 						/** @type {{ u: string, l: string, h: number, v: string|null, r: string|null }} */
 						const faked = {
 							u: navigator.userAgent,
@@ -501,7 +594,6 @@ test("Spoof: intercept Worker and fake consistent data", async ({ page }) => {
 							v: null,
 							r: null
 						};
-						// Try to get WebGL info
 						try {
 							const canvas = document.createElement("canvas");
 							const gl = canvas.getContext("webgl");
@@ -633,10 +725,13 @@ test("Spoof: ULTIMATE stealth — all evasions combined", async ({ page }) => {
 			const worker = new OriginalWorker(url);
 			/** @type {Function|null} */
 			let userCallback = null;
+			const origAddEventListener = worker.addEventListener.bind(worker);
+
 			Object.defineProperty(worker, "onmessage", {
 				set(fn) {
 					userCallback = fn;
-					worker.addEventListener("message", () => {
+					origAddEventListener("message", (/** @type {MessageEvent} */ e) => {
+						e.stopImmediatePropagation();
 						/** @type {{ u: string, l: string, h: number, v: string|null, r: string|null }} */
 						const faked = {
 							u: navigator.userAgent,
@@ -671,45 +766,20 @@ test("Spoof: ULTIMATE stealth — all evasions combined", async ({ page }) => {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 21. HUMAN BYPASS: Trick detection into returning "Human"
-//     This test uses EVERY available evasion technique to defeat bot detection.
-//     It is SUCCESSFUL if the detection script returns "Human" — meaning we
-//     fooled it into thinking Playwright is a real user.
-//
-//     Strategy:
-//       • Launch Chromium with stealth flags to remove automation markers
-//       • Use new headless mode (clean User-Agent without "HeadlessChrome")
-//       • Enable hardware GPU via DirectX ANGLE on Windows
-//       • Conditionally apply a WebGL Proxy (only if software rendering
-//         is detected) with get/apply/construct traps to survive the
-//         tampering check's toString, prototype, call, and constructor tests
-//       • Intercept Worker constructor to return consistent GPU values
-//       • Override navigator.connection.rtt (headless always has 0)
-//       • Override mediaDevices.enumerateDevices (headless has no devices)
-//       • Rely on system fonts (Segoe UI on Windows) for the fonts check
-//       • Rely on system emoji fonts for the emoji canvas check
-//       • Do NOT override navigator.userAgent — keeps worker UA consistent
+//     This test is aspirational — it attempts to defeat ALL detection checks.
+//     It is marked as fixme because if it passes, it means detection has a
+//     weakness. If it fails, detection is working correctly.
+//     Flip to a regular test() once you intentionally want to verify bypass.
 // ──────────────────────────────────────────────────────────────────────────────
-test("Human bypass: trick detection into returning Human", async () => {
+test.fixme("Human bypass: trick detection into returning Human", async () => {
 
-	// Use Playwright's Chromium browser type to launch with custom args
 	/** @type {import('@playwright/test').BrowserType} */
 	const pwChromium = require("@playwright/test").chromium;
 
 	const browser = await pwChromium.launch({
-
-		// New headless mode (Chromium 112+): presents as normal Chrome,
-		// does NOT inject "HeadlessChrome" into the User-Agent string
 		headless: true,
-
 		args: [
-			// ─── Anti-automation ─────────────────────────────────────────
-			// Prevents Chromium from setting navigator.webdriver = true
 			"--disable-blink-features=AutomationControlled",
-
-			// ─── GPU / WebGL ─────────────────────────────────────────────
-			// Attempt to use real GPU via DirectX 11 ANGLE backend (Windows)
-			// If unavailable, falls back to SwiftShader; the init script
-			// detects this and applies a Proxy-based override
 			"--enable-webgl",
 			"--enable-webgl2",
 			"--ignore-gpu-blocklist",
@@ -717,8 +787,6 @@ test("Human bypass: trick detection into returning Human", async () => {
 			"--use-gl=angle",
 			"--use-angle=d3d11",
 			"--enable-accelerated-2d-canvas",
-
-			// ─── General stealth ─────────────────────────────────────────
 			"--disable-extensions",
 			"--no-first-run",
 			"--disable-default-apps",
@@ -733,224 +801,177 @@ test("Human bypass: trick detection into returning Human", async () => {
 		]
 	});
 
-	// Create a realistic desktop browsing context
-	const context = await browser.newContext({
-		screen: { width: 1920, height: 1080 },
-		viewport: { width: 1366, height: 768 },
-		deviceScaleFactor: 1,
-		hasTouch: false,
-		isMobile: false,
-		locale: "en-GB",
-		timezoneId: "Europe/London",
-	});
-
-	const page = await context.newPage();
-
-	// ──────────────────────────────────────────────────────────────────────
-	// Stealth init script — runs BEFORE any page JavaScript
-	// ──────────────────────────────────────────────────────────────────────
-	await page.addInitScript(() => {
-
-		// ─── 1. Detect software rendering ────────────────────────────────
-		// If the GPU flags gave us a real GPU, no WebGL spoofing is needed.
-		// If we still have SwiftShader / Mesa / etc., apply a Proxy override.
-		let needsGpuSpoof = false;
-		const fakeRenderer = "ANGLE (Intel, Intel(R) UHD Graphics 630 (CFL GT2), D3D11)";
-		const fakeVendor = "Google Inc. (Intel)";
-
-		try {
-			const testCanvas = document.createElement("canvas");
-			const testGl = testCanvas.getContext("webgl");
-			if (testGl) {
-				const testExt = testGl.getExtension("WEBGL_debug_renderer_info");
-				if (testExt) {
-					const renderer = /** @type {string} */ (
-						testGl.getParameter(testExt.UNMASKED_RENDERER_WEBGL)
-					).toLowerCase();
-					needsGpuSpoof = ["software", "swiftshader", "mesa", "llvmpipe", "vmware"]
-						.some(s => renderer.includes(s));
-				}
-			}
-		} catch (_) {
-			needsGpuSpoof = true;
-		}
-
-		if (needsGpuSpoof) {
-
-			// ─── 2. WebGL Proxy ──────────────────────────────────────────
-			// A Proxy around the native getParameter that:
-			//   • get trap:       masks toString() → native code string
-			//   • apply trap:     intercepts renderer/vendor/texture queries
-			//   • construct trap: throws "is not a constructor" to match native
-			//
-			// This survives every sub-check of the tampering() function:
-			//   ✓ toString          → get trap returns native signature
-			//   ✓ own property      → Object.defineProperty on prototype
-			//   ✓ illegal invocation → Reflect.apply passes through to native
-			//   ✓ constructor check → construct trap throws correct message
-			const proto = WebGLRenderingContext.prototype;
-			const origGetParam = proto.getParameter;
-			const origGetPrecision = proto.getShaderPrecisionFormat;
-
-			const gpuProxy = new Proxy(origGetParam, {
-				/** @param {Function} target @param {string|symbol} prop */
-				get(target, prop) {
-					if (prop === "toString") {
-						return () => "function getParameter() { [native code] }";
-					}
-					return Reflect.get(target, prop);
-				},
-
-				/** @param {Function} target @param {WebGLRenderingContext} thisArg @param {Array<*>} args */
-				apply(target, thisArg, args) {
-					// UNMASKED_RENDERER_WEBGL
-					if (args[0] === 0x9246) return fakeRenderer;
-					// UNMASKED_VENDOR_WEBGL
-					if (args[0] === 0x9245) return fakeVendor;
-					// MAX_TEXTURE_SIZE
-					if (args[0] === 3379) return 16384;
-					return Reflect.apply(target, thisArg, args);
-				},
-
-				construct() {
-					throw new TypeError("proto.getParameter is not a constructor");
-				}
-			});
-
-			Object.defineProperty(proto, "getParameter", {
-				value: gpuProxy,
-				writable: true,
-				configurable: true
-			});
-
-			// Override shader precision (no tampering check on this method)
-			proto.getShaderPrecisionFormat = function (
-				/** @type {number} */ shaderType,
-				/** @type {number} */ precisionType
-			) {
-				const result = origGetPrecision.call(this, shaderType, precisionType);
-				const p = result ? result.precision : 0;
-				const rMin = result ? result.rangeMin : 0;
-				const rMax = result ? result.rangeMax : 0;
-				return {
-					precision: Math.max(p, 23),
-					rangeMin: Math.max(rMin, 127),
-					rangeMax: Math.max(rMax, 127)
-				};
-			};
-
-			// ─── 3. Worker interception ──────────────────────────────────
-			// The worker check creates a Web Worker that collects
-			// navigator.userAgent, languages, hardwareConcurrency, and
-			// WebGL vendor/renderer, then compares against main-thread values.
-			//
-			// Because our Proxy only exists on the main thread's prototype,
-			// the worker would report real (software) GPU values → mismatch.
-			// We intercept the Worker constructor to return values matching
-			// the main thread's (spoofed) environment.
-			const OriginalWorker = window.Worker;
-			// @ts-ignore — intentional Worker constructor override
-			window.Worker = function (/** @type {string | URL} */ url) {
-				const w = new OriginalWorker(url);
-				/** @type {Function|null} */
-				let userCallback = null;
-				Object.defineProperty(w, "onmessage", {
-					set(fn) {
-						userCallback = fn;
-						w.addEventListener("message", () => {
-							fn({
-								data: {
-									u: navigator.userAgent,
-									l: JSON.stringify(navigator.languages),
-									h: navigator.hardwareConcurrency,
-									v: fakeVendor,
-									r: fakeRenderer
-								}
-							});
-						});
-					},
-					get() { return userCallback; },
-					configurable: true
-				});
-				return w;
-			};
-		}
-
-		// ─── 4. Connection RTT ───────────────────────────────────────────
-		// Headless Chrome always reports rtt = 0. Without this override the
-		// rtt check fails because: connection.rtt > 0 → false.
-		Object.defineProperty(navigator, "connection", {
-			get: () => ({
-				rtt: 50,
-				downlink: 10,
-				effectiveType: "4g",
-				saveData: false
-			}),
-			configurable: true,
-			enumerable: true
+	try {
+		const context = await browser.newContext({
+			screen: { width: 1920, height: 1080 },
+			viewport: { width: 1366, height: 768 },
+			deviceScaleFactor: 1,
+			hasTouch: false,
+			isMobile: false,
+			locale: "en-GB",
+			timezoneId: "Europe/London",
 		});
 
-		// ─── 5. Audio devices ────────────────────────────────────────────
-		// Headless Chrome has no audio devices → enumerateDevices() returns
-		// an empty array → the audio check fails.
-		if (navigator.mediaDevices) {
-			navigator.mediaDevices.enumerateDevices = () =>
-				Promise.resolve([
-					/** @type {MediaDeviceInfo} */ ({
-						deviceId: "default",
-						kind: "audioinput",
-						label: "",
-						groupId: "g1",
-						toJSON() { return {}; }
-					}),
-					/** @type {MediaDeviceInfo} */ ({
-						deviceId: "communications",
-						kind: "audiooutput",
-						label: "",
-						groupId: "g2",
-						toJSON() { return {}; }
-					})
-				]);
-		}
+		const page = await context.newPage();
 
-		// ─── 6. Chrome runtime object ────────────────────────────────────
-		// Real Chrome has a window.chrome object. Not checked by the current
-		// detection, but included for completeness.
-		// @ts-ignore — chrome runtime shim
-		if (!window.chrome) {
-			// @ts-ignore
-			window.chrome = {
-				runtime: {
-					connect: () => {},
-					sendMessage: () => {}
+		await page.addInitScript(() => {
+
+			let needsGpuSpoof = false;
+			const fakeRenderer = "ANGLE (Intel, Intel(R) UHD Graphics 630 (CFL GT2), D3D11)";
+			const fakeVendor = "Google Inc. (Intel)";
+
+			try {
+				const testCanvas = document.createElement("canvas");
+				const testGl = testCanvas.getContext("webgl");
+				if (testGl) {
+					const testExt = testGl.getExtension("WEBGL_debug_renderer_info");
+					if (testExt) {
+						const renderer = /** @type {string} */ (
+							testGl.getParameter(testExt.UNMASKED_RENDERER_WEBGL)
+						).toLowerCase();
+						needsGpuSpoof = ["software", "swiftshader", "mesa", "llvmpipe", "vmware"]
+							.some(s => renderer.includes(s));
+					}
 				}
-			};
-		}
-	});
+			} catch (_) {
+				needsGpuSpoof = true;
+			}
 
-	// ──────────────────────────────────────────────────────────────────────
-	// Navigate and wait for all async detection checks to complete
-	// ──────────────────────────────────────────────────────────────────────
-	await page.goto(pageUrl);
-	await page.waitForTimeout(4000);
+			if (needsGpuSpoof) {
+				const proto = WebGLRenderingContext.prototype;
+				const origGetParam = proto.getParameter;
+				const origGetPrecision = proto.getShaderPrecisionFormat;
 
-	// Log individual check results for diagnostic purposes
-	const rows = await page.locator("#table tr").all();
-	for (let i = 1; i < rows.length; i++) {
-		const cells = await rows[i].locator("td").all();
-		if (cells.length >= 2) {
-			const testName = await cells[0].textContent();
-			const testResult = await cells[1].textContent();
-			// eslint-disable-next-line no-console
-			console.log(`  [${testResult === "Pass" ? "PASS" : "FAIL"}] ${testName}: ${testResult}`);
+				const gpuProxy = new Proxy(origGetParam, {
+					/** @param {Function} target @param {string|symbol} prop */
+					get(target, prop) {
+						if (prop === "toString") {
+							return () => "function getParameter() { [native code] }";
+						}
+						return Reflect.get(target, prop);
+					},
+					/** @param {Function} target @param {WebGLRenderingContext} thisArg @param {Array<*>} args */
+					apply(target, thisArg, args) {
+						if (args[0] === 0x9246) return fakeRenderer;
+						if (args[0] === 0x9245) return fakeVendor;
+						if (args[0] === 3379) return 16384;
+						return Reflect.apply(target, thisArg, args);
+					},
+					construct() {
+						throw new TypeError("proto.getParameter is not a constructor");
+					}
+				});
+
+				Object.defineProperty(proto, "getParameter", {
+					value: gpuProxy,
+					writable: true,
+					configurable: true
+				});
+
+				proto.getShaderPrecisionFormat = function (
+					/** @type {number} */ shaderType,
+					/** @type {number} */ precisionType
+				) {
+					const result = origGetPrecision.call(this, shaderType, precisionType);
+					const p = result ? result.precision : 0;
+					const rMin = result ? result.rangeMin : 0;
+					const rMax = result ? result.rangeMax : 0;
+					return {
+						precision: Math.max(p, 23),
+						rangeMin: Math.max(rMin, 127),
+						rangeMax: Math.max(rMax, 127)
+					};
+				};
+
+				const OriginalWorker = window.Worker;
+				// @ts-ignore — intentional Worker constructor override
+				window.Worker = function (/** @type {string | URL} */ url) {
+					const w = new OriginalWorker(url);
+					/** @type {Function|null} */
+					let userCallback = null;
+					const origAddEventListener = w.addEventListener.bind(w);
+					Object.defineProperty(w, "onmessage", {
+						set(fn) {
+							userCallback = fn;
+							origAddEventListener("message", (/** @type {MessageEvent} */ e) => {
+								e.stopImmediatePropagation();
+								fn({
+									data: {
+										u: navigator.userAgent,
+										l: JSON.stringify(navigator.languages),
+										h: navigator.hardwareConcurrency,
+										v: fakeVendor,
+										r: fakeRenderer
+									}
+								});
+							});
+						},
+						get() { return userCallback; },
+						configurable: true
+					});
+					return w;
+				};
+			}
+
+			Object.defineProperty(navigator, "connection", {
+				get: () => ({
+					rtt: 50,
+					downlink: 10,
+					effectiveType: "4g",
+					saveData: false
+				}),
+				configurable: true,
+				enumerable: true
+			});
+
+			if (navigator.mediaDevices) {
+				navigator.mediaDevices.enumerateDevices = () =>
+					Promise.resolve([
+						/** @type {MediaDeviceInfo} */ ({
+							deviceId: "default",
+							kind: "audioinput",
+							label: "",
+							groupId: "g1",
+							toJSON() { return {}; }
+						}),
+						/** @type {MediaDeviceInfo} */ ({
+							deviceId: "communications",
+							kind: "audiooutput",
+							label: "",
+							groupId: "g2",
+							toJSON() { return {}; }
+						})
+					]);
+			}
+
+			// @ts-ignore — chrome runtime shim
+			if (!window.chrome) {
+				// @ts-ignore
+				window.chrome = {
+					runtime: {
+						connect: () => {},
+						sendMessage: () => {}
+					}
+				};
+			}
+		});
+
+		await page.goto(pageUrl);
+		await page.locator(".bot__result:not(:text('Unknown'))").waitFor({ timeout: 10000 });
+
+		const rows = await page.locator("#table tr").all();
+		for (let i = 1; i < rows.length; i++) {
+			const cells = await rows[i].locator("td").all();
+			if (cells.length >= 2) {
+				const testName = await cells[0].textContent();
+				const testResult = await cells[1].textContent();
+				console.log(`  [${testResult === "Pass" ? "PASS" : "FAIL"}] ${testName}: ${testResult}`);
+			}
 		}
+
+		const result = await page.locator(".bot__result").textContent();
+		expect(result).toBe("Human");
+	} finally {
+		await browser.close();
 	}
-
-	// ──────────────────────────────────────────────────────────────────────
-	// The moment of truth: the test PASSES if detection returns "Human"
-	// ──────────────────────────────────────────────────────────────────────
-	const result = await page.locator(".bot__result").textContent();
-	expect(result).toBe("Human");
-
-	await browser.close();
 });

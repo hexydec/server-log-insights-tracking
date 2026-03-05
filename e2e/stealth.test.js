@@ -1,7 +1,7 @@
 // @ts-check
 const { test, expect } = require("@playwright/test");
 
-const pageUrl = "http://127.0.0.1/server-log-insights-tracking/tests/robot.html";
+const pageUrl = process.env.TEST_URL || "http://127.0.0.1/server-log-insights-tracking/tests/robot.html";
 
 /**
  * @typedef {Object} StealthProfile
@@ -21,16 +21,12 @@ const pageUrl = "http://127.0.0.1/server-log-insights-tracking/tests/robot.html"
 const profiles = [
 
 	// ── Profile A: Default stealth (all built-in evasions) ───────────────
-	// Uses every evasion the stealth plugin ships with out of the box.
-	// This is the most common configuration a bot operator would use.
 	{
 		name: "Default stealth (all evasions)",
 		description: "Uses all built-in stealth plugin evasions with no customisation"
 	},
 
 	// ── Profile B: Stealth + GPU flags ───────────────────────────────────
-	// Adds Chromium flags to request a real GPU (DirectX ANGLE on Windows),
-	// which helps pass the accelerated/precision/textures checks natively.
 	{
 		name: "Stealth + GPU acceleration flags",
 		description: "All stealth evasions plus Chromium GPU flags for hardware WebGL",
@@ -46,8 +42,6 @@ const profiles = [
 	},
 
 	// ── Profile C: Stealth + RTT/audio spoofs ────────────────────────────
-	// The stealth plugin doesn't override navigator.connection.rtt or
-	// mediaDevices.enumerateDevices. This profile adds those manually.
 	{
 		name: "Stealth + RTT and audio device spoofs",
 		description: "All stealth evasions plus manual RTT and audio device overrides",
@@ -87,9 +81,6 @@ const profiles = [
 	},
 
 	// ── Profile D: Stealth + GPU + RTT/audio + WebGL Proxy ───────────────
-	// The "kitchen sink" profile: stealth plugin + GPU flags + manual
-	// overrides for RTT, audio, and a Proxy-based WebGL spoof with
-	// get/apply/construct traps to survive the tampering check.
 	{
 		name: "Full stealth (plugin + GPU + RTT + audio + WebGL Proxy)",
 		description: "Maximum evasion: stealth plugin plus every manual override",
@@ -164,7 +155,6 @@ const profiles = [
 					const origGetParam = proto.getParameter;
 					const origGetPrecision = proto.getShaderPrecisionFormat;
 
-					// Proxy with get/apply/construct traps to survive tampering check
 					const gpuProxy = new Proxy(origGetParam, {
 						get(target, prop) {
 							if (prop === "toString") {
@@ -211,10 +201,12 @@ const profiles = [
 						const w = new OriginalWorker(url);
 						/** @type {Function|null} */
 						let cb = null;
+						const origAddEventListener = w.addEventListener.bind(w);
 						Object.defineProperty(w, "onmessage", {
 							set(fn) {
 								cb = fn;
-								w.addEventListener("message", () => {
+								origAddEventListener("message", (/** @type {MessageEvent} */ e) => {
+									e.stopImmediatePropagation();
 									fn({
 										data: {
 											u: navigator.userAgent,
@@ -236,9 +228,6 @@ const profiles = [
 	},
 
 	// ── Profile E: Stealth in headed mode ────────────────────────────────
-	// Runs the browser in headed mode (non-headless). This naturally passes
-	// many checks (UA, WebGL, audio) but tests whether the stealth plugin
-	// handles the webdriver flag and other markers in headed mode.
 	{
 		name: "Stealth headed mode",
 		description: "Uses stealth plugin with a visible browser window (non-headless)",
@@ -248,6 +237,12 @@ const profiles = [
 		]
 	}
 ];
+
+// Apply puppeteer-extra stealth plugin once (singleton — must not be called per-test)
+/** @type {*} */
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+puppeteer.use(StealthPlugin());
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Generate a test for each stealth profile
@@ -279,20 +274,10 @@ for (const profile of profiles) {
 			<body>
 				<h1>Stealth Plugin: ${profile.name}</h1>
 				<p class="desc">${profile.description}</p>
-				<p class="status">⏳ Launching Puppeteer with stealth plugin…</p>
+				<p class="status">Launching Puppeteer with stealth plugin...</p>
 			</body>
 			</html>
 		`);
-
-		// Dynamically require puppeteer-extra and the stealth plugin
-		// (these are CommonJS modules, not compatible with Playwright's runner
-		//  directly, so we launch a separate Puppeteer browser instance)
-		/** @type {*} */
-		const puppeteer = require("puppeteer-extra");
-		const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-
-		// Apply the stealth plugin
-		puppeteer.use(StealthPlugin());
 
 		// Build launch args
 		/** @type {string[]} */
@@ -316,99 +301,101 @@ for (const profile of profiles) {
 			executablePath: undefined
 		});
 
-		const ppPage = await browser.newPage();
+		try {
+			const ppPage = await browser.newPage();
 
-		// Set a realistic viewport
-		await ppPage.setViewport({ width: 1366, height: 768 });
+			// Set a realistic viewport
+			await ppPage.setViewport({ width: 1366, height: 768 });
 
-		// Apply any extra evasions specific to this profile
-		if (profile.extraEvasions) {
-			await profile.extraEvasions(ppPage);
-		}
-
-		// Update Playwright UI
-		await pwPage.locator(".status").evaluate(el => {
-			el.textContent = "⏳ Navigating to detection test page…";
-		});
-
-		// Navigate to the detection test page
-		await ppPage.goto(pageUrl, { waitUntil: "domcontentloaded" });
-
-		// Wait for all async detection checks to complete
-		await new Promise(r => setTimeout(r, 4000));
-
-		// Collect individual check results
-		/** @type {{ name: string, result: string }[]} */
-		const checkResults = [];
-		const rows = await ppPage.$$("#table tr");
-		for (let i = 1; i < rows.length; i++) {
-			const cells = await rows[i].$$("td");
-			if (cells.length >= 2) {
-				const testName = await cells[0].evaluate((/** @type {HTMLElement} */ el) => el.textContent) || "";
-				const testResult = await cells[1].evaluate((/** @type {HTMLElement} */ el) => el.textContent) || "";
-				checkResults.push({ name: testName, result: testResult });
-				// eslint-disable-next-line no-console
-				console.log(`  [${testResult === "Pass" ? "PASS" : "FAIL"}] ${testName}: ${testResult}`);
+			// Apply any extra evasions specific to this profile
+			if (profile.extraEvasions) {
+				await profile.extraEvasions(ppPage);
 			}
+
+			// Update Playwright UI
+			await pwPage.locator(".status").evaluate(el => {
+				el.textContent = "Navigating to detection test page...";
+			});
+
+			// Navigate to the detection test page
+			await ppPage.goto(pageUrl, { waitUntil: "domcontentloaded" });
+
+			// Wait for detection to complete
+			await ppPage.waitForFunction(
+				() => {
+					const el = document.querySelector(".bot__result");
+					return el && el.textContent !== "Unknown";
+				},
+				{ timeout: 10000 }
+			);
+
+			// Collect individual check results
+			/** @type {{ name: string, result: string }[]} */
+			const checkResults = [];
+			const rows = await ppPage.$$("#table tr");
+			for (let i = 1; i < rows.length; i++) {
+				const cells = await rows[i].$$("td");
+				if (cells.length >= 2) {
+					const testName = await cells[0].evaluate((/** @type {HTMLElement} */ el) => el.textContent) || "";
+					const testResult = await cells[1].evaluate((/** @type {HTMLElement} */ el) => el.textContent) || "";
+					checkResults.push({ name: testName, result: testResult });
+					console.log(`  [${testResult === "Pass" ? "PASS" : "FAIL"}] ${testName}: ${testResult}`);
+				}
+			}
+
+			// Get the detection result
+			const resultEl = await ppPage.$(".bot__result");
+			const result = await resultEl?.evaluate((/** @type {HTMLElement} */ el) => el.textContent) || "Unknown";
+
+			console.log(`\n  Profile: ${profile.name}`);
+			console.log(`  Description: ${profile.description}`);
+			console.log(`  Detection result: ${result}`);
+			console.log(`  ${result === "Human" ? "WARNING: BYPASSED — bot was NOT detected" : "DETECTED — bot was caught"}\n`);
+
+			// Render results into the Playwright UI page
+			const isRobot = result === "a Robot";
+			const tableRows = checkResults.map(r =>
+				`<tr><td>${r.name}</td><td class="${r.result === "Pass" ? "pass" : "fail"}">${r.result}</td></tr>`
+			).join("");
+
+			await pwPage.setContent(`
+				<html>
+				<head>
+					<style>
+						body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
+						h1 { margin-bottom: 4px; }
+						p.desc { color: #666; margin-top: 0; }
+						table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+						th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid #ddd; }
+						th { background: #f5f5f5; }
+						.pass { color: green; font-weight: bold; }
+						.fail { color: red; font-weight: bold; }
+						.verdict { font-size: 1.4em; margin-top: 16px; padding: 12px; border-radius: 6px; }
+						.verdict--robot { background: #e8f5e9; color: #2e7d32; }
+						.verdict--human { background: #fce4ec; color: #c62828; }
+					</style>
+				</head>
+				<body>
+					<h1>Stealth Plugin: ${profile.name}</h1>
+					<p class="desc">${profile.description}</p>
+					<div class="verdict ${isRobot ? "verdict--robot" : "verdict--human"}">
+						${isRobot
+							? "DETECTED — Detection identified the bot as: <strong>a Robot</strong>"
+							: "WARNING: BYPASSED — Detection was fooled, returned: <strong>Human</strong>"
+						}
+					</div>
+					<table>
+						<tr><th>Check</th><th>Result</th></tr>
+						${tableRows}
+					</table>
+				</body>
+				</html>
+			`);
+
+			// The test expects detection to still work (catch the bot).
+			expect(result).toBe("a Robot");
+		} finally {
+			await browser.close();
 		}
-
-		// Get the detection result
-		const resultEl = await ppPage.$(".bot__result");
-		const result = await resultEl?.evaluate((/** @type {HTMLElement} */ el) => el.textContent) || "Unknown";
-
-		// eslint-disable-next-line no-console
-		console.log(`\n  Profile: ${profile.name}`);
-		// eslint-disable-next-line no-console
-		console.log(`  Description: ${profile.description}`);
-		// eslint-disable-next-line no-console
-		console.log(`  Detection result: ${result}`);
-		// eslint-disable-next-line no-console
-		console.log(`  ${result === "Human" ? "⚠ BYPASSED — bot was NOT detected" : "✓ DETECTED — bot was caught"}\n`);
-
-		// Render results into the Playwright UI page
-		const isRobot = result === "a Robot";
-		const tableRows = checkResults.map(r =>
-			`<tr><td>${r.name}</td><td class="${r.result === "Pass" ? "pass" : "fail"}">${r.result}</td></tr>`
-		).join("");
-
-		await pwPage.setContent(`
-			<html>
-			<head>
-				<style>
-					body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
-					h1 { margin-bottom: 4px; }
-					p.desc { color: #666; margin-top: 0; }
-					table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-					th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid #ddd; }
-					th { background: #f5f5f5; }
-					.pass { color: green; font-weight: bold; }
-					.fail { color: red; font-weight: bold; }
-					.verdict { font-size: 1.4em; margin-top: 16px; padding: 12px; border-radius: 6px; }
-					.verdict--robot { background: #e8f5e9; color: #2e7d32; }
-					.verdict--human { background: #fce4ec; color: #c62828; }
-				</style>
-			</head>
-			<body>
-				<h1>Stealth Plugin: ${profile.name}</h1>
-				<p class="desc">${profile.description}</p>
-				<div class="verdict ${isRobot ? "verdict--robot" : "verdict--human"}">
-					${isRobot
-						? "✓ DETECTED — Detection identified the bot as: <strong>a Robot</strong>"
-						: "⚠ BYPASSED — Detection was fooled, returned: <strong>Human</strong>"
-					}
-				</div>
-				<table>
-					<tr><th>Check</th><th>Result</th></tr>
-					${tableRows}
-				</table>
-			</body>
-			</html>
-		`);
-
-		// The test expects detection to still work (catch the bot).
-		// If it fails, the stealth profile successfully bypassed detection.
-		expect(result).toBe("a Robot");
-
-		await browser.close();
 	});
 }

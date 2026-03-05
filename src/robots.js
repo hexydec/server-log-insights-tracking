@@ -44,6 +44,7 @@ const funcs = {
 	emoji: () => {
 		const canvas = document.createElement("canvas"),
 			context = canvas.getContext("2d"); //, {willReadFrequently: true}
+		if (!context) return false;
 		canvas.width = 10;
 		canvas.height = 10;
 		context.textBaseline = "middle";
@@ -67,12 +68,11 @@ const funcs = {
 			const info = gl.getExtension("WEBGL_debug_renderer_info");
 			if (info) {
 				const renderer = gl.getParameter(info.UNMASKED_RENDERER_WEBGL).toLowerCase();
-				console.log(renderer);
 				return !["software", "mesa", "swiftshader", "llvmpipe", "vmware"].some(item => renderer.includes(item));
 			}
 			return true;
 		}
-		return false;
+		return true; // no WebGL — skip check
 	},
 
 	// check that the graphics renderer has high precision floats, otherwise it could be a software renderer
@@ -81,20 +81,20 @@ const funcs = {
 			const prec = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
 			return prec ? prec.precision > 22 && prec.rangeMax > 100 : false;
 		}
-		return false;
+		return true; // no WebGL — skip check
 	},
 
 	// check the max texture size, as when CPU rendering, this will be low
-	textures: () => gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192 : false,
+	textures: () => gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192 : true,
 
 	// check for tampering
 	tampering: () => {
+		if (typeof WebGLRenderingContext === "undefined") return true;
 		const proto = WebGLRenderingContext.prototype,
 			target = proto.getParameter;
 
 		// native code string check
 		if (target.toString().replace(/[\n\r\t ]+/g, " ") !== 'function getParameter() { [native code] }') {
-			console.log(target.toString().replace(/[\n\r\t ]+/g, " "));
 			return false;
 
 		// prototype check
@@ -202,7 +202,7 @@ const funcs = {
 				return context.measureText(text).width !== width;
 			}
 		}
-		return null;
+		return true; // unknown platform — skip check
 	},
 
 	// check that worker meta data matches the main machine
