@@ -128,7 +128,7 @@ const funcs = {
 		}
 		
 		// check if navigator.connection has been overwritten
-		if (navigator.connection && !(navigator.connection instanceof NetworkInformation)) {
+		if (navigator.connection && window.NetworkInformation && !(navigator.connection instanceof NetworkInformation)) {
 			return false;
 		}
 		return true;
