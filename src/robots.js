@@ -17,28 +17,16 @@ const funcs = {
 	ua: () => !ua.includes("headlesschrome/"),
 
 	// round trip time will be 0 in headless
-	rtt: () => navigator.connection && "rtt" in navigator.connection ? navigator.connection.rtt > 0 : !ua.includes("chrome/"),
+	rtt: () => navigator.connection && window.NetworkInformation && "rtt" in navigator.connection && navigator.connection instanceof NetworkInformation ? navigator.connection.rtt > 0 : !ua.includes("chrome/"),
 
 	// check CPU's and RAM
-	hardware: () => navigator.hardwareConcurrency > 1 && (navigator.deviceMemory || 2) > 1,
-
-	// browsers normally have toolbars, making these values different
-	// width: () => window.innerHeight !== window.outerHeight,
+	hardware: () => navigator.hardwareConcurrency > 1 && (navigator.deviceMemory || 1) >= 1,
 
 	// devices normally have sound
-	audio: () => navigator.mediaDevices ? navigator.mediaDevices.enumerateDevices().then(devices => devices.length > 0) : false,
-
-	// check for patent encumbered codecs that are not bundled with headless browsers
-	// codecs: () => {
-	// 	const video = document.createElement("video");
-	// 	return video.canPlayType('video/mp4; codecs="avc1.42E01E"') === "probably" && video.canPlayType('audio/mp4; codecs="mp4a.40.2"') === "probably";
-	// },
+	audio: () => navigator.mediaDevices ? navigator.mediaDevices.enumerateDevices().then(devices => devices.length > 0 && devices.every(item => item instanceof MediaDeviceInfo)) : false,
 	
 	// mobiles will always have touch points
 	touch: () => mobile ? navigator.maxTouchPoints > 0 : true,
-
-	// check if the reported battery level is less than 100%
-	// battery: () => mobile && navigator.getBattery ? navigator.getBattery().then(battery => battery.level < 1.0) : true,
 
 	// see if emoji's are supported, if not then probably bot
 	emoji: () => {
@@ -80,10 +68,11 @@ const funcs = {
 			const prec = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
 			return prec.precision > 22 && prec.rangeMax > 100;
 		}
+		return false;
 	},
 
 	// check the max texture size, as when CPU rendering, this will be low
-	textures: () => gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192,
+	textures: () => gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192 : false,
 
 	// check for tampering
 	tampering: () => {
@@ -126,11 +115,6 @@ const funcs = {
 				return false;
 			}
 		}
-		
-		// check if navigator.connection has been overwritten
-		if (navigator.connection && window.NetworkInformation && !(navigator.connection instanceof NetworkInformation)) {
-			return false;
-		}
 		return true;
 	},
 
@@ -166,7 +150,12 @@ const funcs = {
 					font: "Roboto"
 				},
 				{
-					match: "ios",
+					match: "iphone",
+					base: "sans-serif",
+					font: "Geeza Pro"
+				},
+				{
+					match: "ipad",
 					base: "sans-serif",
 					font: "Geeza Pro"
 				}
@@ -193,40 +182,33 @@ const funcs = {
 				return context.measureText(text).width !== width;
 			}
 		}
-		return null;
+		return true;
 	},
 
 	// check that worker meta data matches the main machine
 	worker: () => {
-		return new Promise(resolve => {
-			const code = 'const o={u:navigator.userAgent,l:JSON.stringify(navigator.languages),h:navigator.hardwareConcurrency,v:null,r:null};try{w=(new OffscreenCanvas(1,1)).getContext("webgl"),e= w.RENDERER?null:w.getExtension("WEBGL_debug_renderer_info"),p={v:w.VENDOR||e.UNMASKED_VENDOR_WEBGL,r:w.RENDERER||e.UNMASKED_RENDERER_WEBGL};for(let k in p){o[k]=w.getParameter(p[k])}}catch(e){}self.postMessage(o)',
-				blob = new Blob([code], {type: "application/javascript"}),
-				url = URL.createObjectURL(blob);
+		return new Promise((resolve, reject) => {
+			try {
+				const code = 'const o={u:navigator.userAgent,l:JSON.stringify(navigator.languages),h:navigator.hardwareConcurrency,v:null,r:null};try{const w=(new OffscreenCanvas(1,1)).getContext("webgl"),e= w.RENDERER?null:w.getExtension("WEBGL_debug_renderer_info"),p={v:w.VENDOR||e.UNMASKED_VENDOR_WEBGL,r:w.RENDERER||e.UNMASKED_RENDERER_WEBGL};for(let k in p){o[k]=w.getParameter(p[k])}}catch(e){}self.postMessage(o)',
+					blob = new Blob([code], {type: "application/javascript"}),
+					url = URL.createObjectURL(blob);
 
-			(new Worker(url)).onmessage = e => {
-				let obj = props(),
-					pass = true;
-				for (let key in obj) {
-					if (obj[key] !== e.data[key]) {
-						pass = false;
-						break;
+				(new Worker(url)).onmessage = e => {
+					let obj = props(),
+						pass = true;
+					for (let key in obj) {
+						if (obj[key] !== e.data[key]) {
+							pass = false;
+							break;
+						}
 					}
-				}
-				resolve(pass);
-			};
+					resolve(pass);
+				};
+			} catch (e) {
+				reject(false);
+			}
 		});
-	},
-
-	// see how fast it renders stuff - slow if CPU
-	// speed: () => {
-	// 	const canvas = document.createElement("canvas"),
-	// 		context = canvas.getContext("2d"),
-	// 		start = performance.now();
-	// 	for (let i = 0; i < 5000; i++) {
-	// 		context.fillRect(i % 100, i % 100, 10, 10);
-	// 	}
-	// 	return performance.now() - start < 16;
-	// }
+	}
 };
 
 export const tests = funcs;
