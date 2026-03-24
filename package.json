@@ -4,6 +4,8 @@
 	"description": "Tracking code for use with Server Log Insights",
 	"main": "index.js",
 	"scripts": {
+		"build": "vite build",
+		"dev": "vite build --watch",
 		"test": "npx playwright test",
 		"test:nogpu": "$env:LIBGL_ALWAYS_SOFTWARE=1; npx playwright test"
 	},
@@ -23,21 +25,14 @@
 		"url": "https://github.com/hexydec/server-log-insights-tracking/issues"
 	},
 	"homepage": "https://github.com/hexydec/server-log-insights-tracking#readme",
-	"dependencies": {
-		"@rollup/plugin-node-resolve": "^16.0.3",
-		"grunt": "^1.6.1",
-		"grunt-contrib-watch": "*",
-		"grunt-rollup": "^12.0.0",
-		"grunt-terser": "^2.0.0",
-		"load-grunt-tasks": "*",
-		"rollup": "^4.59.0",
-		"terser": "^5.46.0"
-	},
+	"dependencies": {},
 	"devDependencies": {
 		"@playwright/test": "^1.58.2",
 		"@types/node": "^25.3.3",
 		"puppeteer": "^24.38.0",
 		"puppeteer-extra": "^3.3.6",
-		"puppeteer-extra-plugin-stealth": "^2.11.2"
+		"puppeteer-extra-plugin-stealth": "^2.11.2",
+		"terser": "^5.46.0",
+		"vite": "^6.3.5"
 	}
 }
