@@ -19,11 +19,36 @@ export default async base => {
 			// n: null, // navigation - external link address
 			// d: null // duration - time on page
 		},
-		send = params => fetch(url + (new URLSearchParams(params)).toString(), {
+
+		// build the querystring, dropping keys we never set
+		query = params => {
+			const data = {};
+			for (let key in params) {
+				if (params[key] !== null && params[key] !== undefined) {
+					data[key] = params[key];
+				}
+			}
+			return url + (new URLSearchParams(data)).toString();
+		},
+
+		// initial request, sent while the page is alive
+		send = params => fetch(query(params), {
 			method: "HEAD",
 			credentials: "omit",
 			keepalive: true
 		}),
+
+		// final request, must survive the page being torn down
+		beacon = params => {
+			const target = query(params);
+
+			// sendBeacon is queued by the browser and outlives the document
+			if (!navigator.sendBeacon || !navigator.sendBeacon(target)) {
+
+				// fall back if unavailable or the queue/size limit was hit
+				send(params);
+			}
+		},
 
 		// timing
 		loaded = Date.now(),
@@ -32,6 +57,7 @@ export default async base => {
 			params.i = entry.domInteractive / 1000; // initial load
 			params.t = entry.domComplete / 1000; // total load
 		}),
+		sent = false,
 		win = window,
 		doc = document;
 
@@ -42,7 +68,7 @@ export default async base => {
 	}
 
 	// make request so we can pick it up in the server logs
-	if (!doc.referrer || new URL(doc.referrer)?.hostname !== location.hostname) {
+	if (!doc.referrer || new URL(doc.referrer).hostname !== location.hostname) {
 		send(params);
 	}
 
@@ -52,23 +78,37 @@ export default async base => {
 	// remember which link we clicked
 	win.addEventListener("click", e => {
 		const link = e.target.closest("a");
-		if (link !== null && new URL(link)?.hostname !== location.hostname) {
-			params.n = link;
+
+		// links without an href, and non-navigating schemes, have no hostname
+		if (link !== null && link.hostname && link.hostname !== location.hostname) {
+			params.n = link.href;
 		}
 	});
-	
-	// send beacon when the user navigates away
-	win.addEventListener("visibilitychange", () => {
 
-		// send the beacon
-		if (doc.visibilityState === "hidden") {
+	// send the beacon when the user navigates away
+	const navigate = () => {
+
+		// the page can be hidden and restored many times, only record the first
+		if (!sent) {
+			sent = true;
 			params.e = "navigate";
 			params.d = Math.floor((Date.now() - loaded) / 1000);
-			send(params);
+			beacon(params);
+		}
+	};
 
-		// reset the start counter
-		} else if (doc.visibilityState === "visible") {
+	// fires when backgrounding, switching tabs, or navigating away
+	win.addEventListener("visibilitychange", () => {
+		if (doc.visibilityState === "hidden") {
+			navigate();
+		} else {
+
+			// reset the start counter, and allow the next hide to be recorded
 			loaded = Date.now();
+			sent = false;
 		}
 	});
+
+	// catches the cases visibilitychange misses, and is bfcache safe
+	win.addEventListener("pagehide", navigate);
 };
