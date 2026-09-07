@@ -1,9 +1,16 @@
 import props from "./worker.js";
 
-const canvas = document.createElement("canvas"),
-	ua = navigator.userAgent.toLowerCase(),
-	mobile = ua.includes("android") || ua.includes("iphone"),
-	gl = canvas.getContext("webgl");
+const ua = navigator.userAgent.toLowerCase(),
+	mobile = ua.includes("android") || ua.includes("iphone");
+
+// build the WebGL context on demand and reuse it, null means it could not be created
+let cached;
+const context = () => {
+	if (cached === undefined) {
+		cached = document.createElement("canvas").getContext("webgl");
+	}
+	return cached;
+};
 
 const funcs = {
 
@@ -11,214 +18,202 @@ const funcs = {
 	phantom: () => !window.callPhantom && !window._phantom && !window.phantom && !window.__nightmare,
 
 	// check not reporting a web driver
-	webdriver: () => !navigator.webdriver && !window.domAutomation && !document.__selenium_unwrapped && !document.__webdriver_evaluate && !document.__driver_evaluate,
+	webdriver: () => !navigator.webdriver,
 
-	// check it is not reporting as headless chrome
-	ua: () => !ua.includes("headlesschrome/"),
+	// stealth tooling deletes or redefines the flag, which leaves it assignable
+	writable: () => {
+		let value = false;
+		if (!navigator.webdriver && !Object.prototype.hasOwnProperty.call(navigator, "webdriver")) {
+			try {
+				navigator.webdriver = 1;
+				value = navigator.webdriver !== 1;
+				delete navigator.webdriver;
 
-	// round trip time will be 0 in headless
-	rtt: () => navigator.connection && window.NetworkInformation && "rtt" in navigator.connection && navigator.connection instanceof NetworkInformation ? navigator.connection.rtt > 0 : !ua.includes("chrome/"),
-
-	// check CPU's and RAM
-	hardware: () => navigator.hardwareConcurrency > 1 && (navigator.deviceMemory || 1) >= 1,
-
-	// devices normally have sound
-	audio: () => navigator.mediaDevices ? navigator.mediaDevices.enumerateDevices().then(devices => devices.length > 0 && devices.every(item => item instanceof MediaDeviceInfo)) : false,
-	
-	// mobiles will always have touch points
-	touch: () => mobile ? navigator.maxTouchPoints > 0 : true,
-
-	// see if emoji's are supported, if not then probably bot
-	emoji: () => {
-		const canvas = document.createElement("canvas"),
-			context = canvas.getContext("2d"); //, {willReadFrequently: true}
-		canvas.width = 10;
-		canvas.height = 10;
-		context.textBaseline = "middle";
-		context.font = "10px Arial";
-		context.fillText("👨‍👩‍👧‍👦", 0, 5);
-		const pixels = context.getImageData(0, 0, 10, 10).data;
-		for (let i = 0; i < pixels.length; i += 4) {
-			const r = pixels[i],
-				g = pixels[i + 1],
-				b = pixels[i + 2];
-			if (r !== g || g !== b) {
-				return true; // found a coloured pixel
+			// a real browser only has a getter, so assigning to it throws under strict mode
+			} catch (e) {
+				value = true;
 			}
 		}
-		return false;
+		return value;
+	},
+
+	// look for the globals the drivers leave behind
+	selenium: () => {
+		const names = ["__driver_evaluate", "__webdriver_evaluate", "__selenium_evaluate", "__fxdriver_evaluate",
+			"__driver_unwrapped", "__webdriver_unwrapped", "__selenium_unwrapped", "__fxdriver_unwrapped",
+			"_Selenium_IDE_Recorder", "_selenium", "calledSelenium", "$cdc_asdjflasutopfhvcZLmcfl_",
+			"$chrome_asyncScriptInfo", "__$webdriverAsyncExecutor", "webdriver", "__webdriverFunc",
+			"domAutomation", "domAutomationController", "__lastWatirAlert", "__lastWatirConfirm",
+			"__lastWatirPrompt", "__webdriver_script_fn", "_WEBDRIVER_ELEM_CACHE"];
+		return !names.some(item => item in window) && !document.__webdriver_script_fn;
+	},
+
+	// playwright binds these into the page to run its own scripts
+	playwright: () => !("__pwInitScripts" in window) && !("__playwright__binding__" in window),
+
+	// the console formats error stacks through this hook, which only runs with a debugger attached
+	cdp: () => {
+		let value = null;
+		try {
+			const original = Error.prepareStackTrace;
+			let accessed = false;
+			Error.prepareStackTrace = () => {
+				accessed = true;
+				return original;
+			};
+			console.debug(new Error(""));
+			Error.prepareStackTrace = original;
+			value = !accessed;
+		} catch (e) {
+
+		}
+		return value;
+	},
+
+	// a desktop chromium build always exposes this, android webviews ship the user agent without it
+	chrome: () => (ua.includes("chrome/") || ua.includes("chromium/") || ua.includes("edg/")) && !mobile ? "chrome" in window : null,
+
+	// automation usually patches the page it was injected into, a fresh frame reports the real values
+	iframe: () => {
+		let value = null;
+		if (document.body !== null) {
+			const frame = document.createElement("iframe");
+			frame.style.display = "none";
+			frame.src = "about:blank";
+			try {
+				document.body.appendChild(frame);
+				const win = frame.contentWindow;
+				if (win && win.navigator) {
+					value = ["webdriver", "userAgent", "platform", "hardwareConcurrency", "language", "languages",
+						"deviceMemory", "vendor", "product", "productSub", "appVersion", "maxTouchPoints"]
+						.every(item => String(win.navigator[item]) === String(navigator[item]));
+				}
+			} catch (e) {
+
+			}
+			frame.remove();
+		}
+		return value;
 	},
 
 	// check the name of the graphics renderer is not a software renderer
 	accelerated: () => {
+		const gl = context();
+		let value = null;
 		if (gl) {
-			const info = gl.RENDERER ? null : gl.getExtension("WEBGL_debug_renderer_info");
-			if (info !== null || gl.RENDERER) {
-				const renderer = gl.getParameter(gl.RENDERER || info.UNMASKED_RENDERER_WEBGL).toLowerCase();
-				return !["software", "mesa", "swiftshader", "llvmpipe", "vmware"].some(item => renderer.includes(item));
+
+			// the plain RENDERER parameter is masked to a generic name, the driver needs the debug extension
+			const info = gl.getExtension("WEBGL_debug_renderer_info"),
+				renderer = info === null ? null : gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
+			if (renderer) {
+				const name = renderer.toLowerCase();
+				value = !["software", "mesa offscreen", "swiftshader", "llvmpipe", "softpipe", "vmware"].some(item => name.includes(item));
 			}
-			return true;
 		}
-		return false;
+		return value;
 	},
-
-	// check that the graphics renderer has high precision floats, otherwise it could be a software renderer
-	precision: () => {
-		if (gl) {
-			const prec = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
-			return prec.precision > 22 && prec.rangeMax > 100;
-		}
-		return false;
-	},
-
-	// check the max texture size, as when CPU rendering, this will be low
-	textures: () => gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192 : false,
 
 	// check for tampering
 	tampering: () => {
-		const proto = WebGLRenderingContext.prototype,
-			target = proto.getParameter;
+		let value = null;
+		if (window.WebGLRenderingContext) {
+			const proto = WebGLRenderingContext.prototype,
+				target = proto.getParameter;
 
-		// Native getParameter should not have a prototype property
-		if (Object.prototype.hasOwnProperty.call(target, "prototype")) {
-			return false;
+			// a native method has no prototype property, reports itself as native code, and sits on the prototype
+			value = !Object.prototype.hasOwnProperty.call(target, "prototype")
+				&& target.toString().replace(/[\n\r\t ]+/g, " ") === 'function getParameter() { [native code] }'
+				&& Object.getOwnPropertyDescriptor(proto, 'getParameter') !== undefined;
 
-		// native code string check
-		} else if (target.toString().replace(/[\n\r\t ]+/g, " ") !== 'function getParameter() { [native code] }') {
-			return false;
-
-		// prototype check
-		} else if (Object.getOwnPropertyDescriptor(proto, 'getParameter') === undefined) {
-			return false;
-		}
-
-		// illegal invocation
-		try {
-			target.call({});
-			return false;
-		} catch (e) {
-			const strings = [
-				"'getParameter' called on an object that does not implement interface WebGLRenderingContext.",
-				"Failed to execute 'getParameter' on 'WebGLRenderingContext': Object value is not of type 'WebGLRenderingContext'.",
-				"Illegal invocation"
-			];
-			if (!strings.includes(e.message)) {
-				return false;
-			}
-		}
-
-		// check for Proxy objects
-		try {
-			new target(); // Native getParameter is not a constructor
-		} catch (e) {
-			if (e.message.includes("is not a constructor") === false) {
-				return false;
-			}
-		}
-		return true;
-	},
-
-	// measure the width of rendered fonts to see if they have the defaults for their platforms
-	fonts: () => {
-		const canvas = document.createElement("canvas"),
-			context = canvas.getContext("2d"),
-			text = "abcdefghijklmnopqrstuvwxyz0123456789",
-			fonts = [
-				{
-					match: "windows",
-					base: "sans-serif",
-					font: "Segoe UI"
-				},
-				{
-					match: "mac os",
-					base: "sans-serif",
-					font: "Menlo"
-				},
-				{
-					match: "macintosh",
-					base: "sans-serif",
-					font: "Menlo"
-				},
-				{
-					match: "ubuntu",
-					base: "sans-serif",
-					font: "Ubuntu"
-				},
-				{
-					match: "android",
-					base: "sans-serif",
-					font: "Roboto"
-				},
-				{
-					match: "iphone",
-					base: "sans-serif",
-					font: "Geeza Pro"
-				},
-				{
-					match: "ipad",
-					base: "sans-serif",
-					font: "Geeza Pro"
+			// every engine throws a TypeError when it is called on the wrong object, but the messages differ
+			if (value) {
+				try {
+					target.call({});
+					value = false;
+				} catch (e) {
+					value = e instanceof TypeError;
 				}
-			];
+			}
 
-		// find the platform to check
-		for (let i = 0; i < fonts.length; i++) {
-			if (ua.includes(fonts[i].match)) {
-
-				// measure the font we want to test - 3 times to look for jitter
-				context.font = "72px " + fonts[i].base;
-				let width = null;
-				for (let n = 0; n < 3; n++) {
-					const measure = context.measureText(text).width;
-					if (width === null) {
-						width = measure;
-					} else if (width !== measure) {
-						return false;
-					}
+			// native getParameter is not a constructor, so anything new can build is a wrapper
+			if (value) {
+				try {
+					new target();
+					value = false;
+				} catch (e) {
+					value = e instanceof TypeError;
 				}
-
-				// compare against the installed font
-				context.font = "72px " + fonts[i].font;
-				return context.measureText(text).width !== width;
 			}
 		}
-		return true;
+		return value;
 	},
 
 	// check that worker meta data matches the main machine
 	worker: () => {
-		return new Promise((resolve, reject) => {
-			try {
-				const code = 'const o={u:navigator.userAgent,l:JSON.stringify(navigator.languages),h:navigator.hardwareConcurrency,v:null,r:null};try{const w=(new OffscreenCanvas(1,1)).getContext("webgl"),e= w.RENDERER?null:w.getExtension("WEBGL_debug_renderer_info"),p={v:w.VENDOR||e.UNMASKED_VENDOR_WEBGL,r:w.RENDERER||e.UNMASKED_RENDERER_WEBGL};for(let k in p){o[k]=w.getParameter(p[k])}}catch(e){}self.postMessage(o)',
-					blob = new Blob([code], {type: "application/javascript"}),
-					url = URL.createObjectURL(blob);
 
-				(new Worker(url)).onmessage = e => {
+		// the check resolves its result, rejecting would abandon every other check
+		return new Promise(resolve => {
+			try {
+				// the worker runs the same collector as the main thread, so the two are always comparable
+				// worker.js is stringified into the blob, so it must only ever reference globals
+				const code = "self.postMessage((" + props + ")())",
+					blob = new Blob([code], {type: "application/javascript"}),
+					url = URL.createObjectURL(blob),
+					worker = new Worker(url),
+
+					// release the blob and answer the check
+					done = pass => {
+						URL.revokeObjectURL(url);
+						resolve(pass);
+					};
+
+				// compare the worker's meta data against the main thread
+				worker.onmessage = e => {
 					let obj = props(),
 						pass = true;
 					for (let key in obj) {
-						if (obj[key] !== e.data[key]) {
+						if (obj[key] !== null && e.data[key] !== null && obj[key] !== e.data[key]) {
 							pass = false;
 							break;
 						}
 					}
-					resolve(pass);
+					done(pass);
 				};
+
+				// a worker blocked by a content security policy errors, or never answers, which proves nothing
+				worker.onerror = () => done(null);
+				setTimeout(() => done(null), 3000);
 			} catch (e) {
-				reject(false);
+				resolve(null);
 			}
 		});
 	}
 };
 
+// the automation markers are conclusive on their own, the hardware ones are circumstantial and need corroborating
+const soft = ["tampering", "accelerated"];
+
 export const tests = funcs;
+export const corroborate = soft;
 
 export default () => {
-	const proms = [];
-	Object.keys(funcs).forEach(key => {
-		proms.push(funcs[key]());
+	const keys = Object.keys(funcs),
+		proms = [];
+
+	// collect the checks, one that throws has failed
+	keys.forEach(key => {
+		try {
+			proms.push(funcs[key]());
+		} catch (e) {
+			proms.push(false);
+		}
 	});
+
+	// gather the checks that failed, one that could not run returns null and does not count either way
 	return Promise.all(proms).then(values => {
-		return values.some(item => !item);
+		const failed = keys.filter((key, i) => values[i] !== null && values[i] !== undefined && !values[i]);
+
+		// a conclusive check convicts by itself, the circumstantial ones only once they agree with each other
+		return failed.some(key => !soft.includes(key)) || failed.length > 1;
 	});
 }

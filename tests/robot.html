@@ -32,41 +32,57 @@
 			<tr>
 				<th>Test</th>
 				<th>Result</th>
+				<th>Counts</th>
 			</tr>
 		</table>
 		<script type="module">
-			import {tests} from "../src/robots.js";
+			import {tests, corroborate} from "../src/robots.js";
 			document.addEventListener("DOMContentLoaded", async () => {
 				const table = document.getElementById("table"),
 					proms = [],
 					keys = Object.keys(tests),
 					start = performance.now();
+
+				// a check that throws has failed
 				keys.forEach(key => {
-					proms.push(tests[key]());
+					try {
+						proms.push(tests[key]());
+					} catch (e) {
+						proms.push(false);
+					}
 				});
 				Promise.all(proms).then(values => {
-					let score = 0,
-						time = performance.now() - start;
+					const time = performance.now() - start,
+						failed = [];
+
+					// list each check, one that could not run does not count either way
 					values.forEach((item, i) => {
 						const row = document.createElement("tr"),
 							test = document.createElement("td"),
-							result = document.createElement("td");
+							result = document.createElement("td"),
+							counts = document.createElement("td"),
+							skipped = item === null || item === undefined,
+							weak = corroborate.includes(keys[i]);
+						if (!skipped && !item) {
+							failed.push(keys[i]);
+						}
 						test.innerText = keys[i];
-						result.innerText = item ? "Pass" : "Fail";
+						result.innerText = skipped ? "Unavailable" : (item ? "Pass" : "Fail");
+						counts.innerText = skipped || item ? "" : (weak ? "Needs corroborating" : "Conclusive");
 						row.appendChild(test);
 						row.appendChild(result);
+						row.appendChild(counts);
 						table.appendChild(row);
-						if (item) {
-							score++;
-						}
 					});
+
+					// a conclusive check convicts by itself, the circumstantial ones only once they agree with each other
 					const target = document.getElementsByClassName("bot__result")[0],
-						isrobot = values.some(item => !item),
-						timing = document.createElement("p");
+						isrobot = failed.some(key => !corroborate.includes(key)) || failed.length > 1,
+						summary = document.createElement("p");
 					target.textContent = isrobot ? "a Robot" : "Human";
 					target.classList.add("bot__result--" + (isrobot ? "robot" : "human"));
-					timing.innerText = "Completed in " + (time / 1000) + "s";
-					table.after(timing);
+					summary.innerText = failed.length + " of " + keys.length + " checks failed, completed in " + (time / 1000) + "s";
+					table.after(summary);
 				});
 			});
 		</script>
