@@ -3,15 +3,6 @@ import props from "./worker.js";
 const ua = navigator.userAgent.toLowerCase(),
 	mobile = ua.includes("android") || ua.includes("iphone");
 
-// build the WebGL context on demand and reuse it, null means it could not be created
-let cached;
-const context = () => {
-	if (cached === undefined) {
-		cached = document.createElement("canvas").getContext("webgl");
-	}
-	return cached;
-};
-
 const funcs = {
 
 	// check is not PhantomJS
@@ -39,12 +30,7 @@ const funcs = {
 
 	// look for the globals the drivers leave behind
 	selenium: () => {
-		const names = ["__driver_evaluate", "__webdriver_evaluate", "__selenium_evaluate", "__fxdriver_evaluate",
-			"__driver_unwrapped", "__webdriver_unwrapped", "__selenium_unwrapped", "__fxdriver_unwrapped",
-			"_Selenium_IDE_Recorder", "_selenium", "calledSelenium", "$cdc_asdjflasutopfhvcZLmcfl_",
-			"$chrome_asyncScriptInfo", "__$webdriverAsyncExecutor", "webdriver", "__webdriverFunc",
-			"domAutomation", "domAutomationController", "__lastWatirAlert", "__lastWatirConfirm",
-			"__lastWatirPrompt", "__webdriver_script_fn", "_WEBDRIVER_ELEM_CACHE"];
+		const names = ["__driver_evaluate", "__webdriver_evaluate", "__selenium_evaluate", "__fxdriver_evaluate", "__driver_unwrapped", "__webdriver_unwrapped", "__selenium_unwrapped", "__fxdriver_unwrapped", "_Selenium_IDE_Recorder", "_selenium", "calledSelenium", "$cdc_asdjflasutopfhvcZLmcfl_", "$chrome_asyncScriptInfo", "__$webdriverAsyncExecutor", "webdriver", "__webdriverFunc", "domAutomation", "__lastWatirPrompt", "__webdriver_script_fn", "_WEBDRIVER_ELEM_CACHE"];
 		return !names.some(item => item in window) && !document.__webdriver_script_fn;
 	},
 
@@ -84,9 +70,7 @@ const funcs = {
 				document.body.appendChild(frame);
 				const win = frame.contentWindow;
 				if (win && win.navigator) {
-					value = ["webdriver", "userAgent", "platform", "hardwareConcurrency", "language", "languages",
-						"deviceMemory", "vendor", "product", "productSub", "appVersion", "maxTouchPoints"]
-						.every(item => String(win.navigator[item]) === String(navigator[item]));
+					value = ["webdriver", "userAgent", "platform", "hardwareConcurrency", "language", "languages", "deviceMemory", "vendor", "product", "productSub", "appVersion", "maxTouchPoints"].every(item => String(win.navigator[item]) === String(navigator[item]));
 				}
 			} catch (e) {
 
@@ -98,7 +82,7 @@ const funcs = {
 
 	// check the name of the graphics renderer is not a software renderer
 	accelerated: () => {
-		const gl = context();
+		const gl = document.createElement("canvas").getContext("webgl");
 		let value = null;
 		if (gl) {
 
@@ -121,28 +105,19 @@ const funcs = {
 				target = proto.getParameter;
 
 			// a native method has no prototype property, reports itself as native code, and sits on the prototype
-			value = !Object.prototype.hasOwnProperty.call(target, "prototype")
-				&& target.toString().replace(/[\n\r\t ]+/g, " ") === 'function getParameter() { [native code] }'
-				&& Object.getOwnPropertyDescriptor(proto, 'getParameter') !== undefined;
+			value = !Object.prototype.hasOwnProperty.call(target, "prototype") && target.toString().replace(/[\n\r\t ]+/g, " ") === "function getParameter() { [native code] }" && Object.getOwnPropertyDescriptor(proto, "getParameter") !== undefined;
 
-			// every engine throws a TypeError when it is called on the wrong object, but the messages differ
+			// a native method throws a TypeError called on the wrong object, and again as a constructor
 			if (value) {
-				try {
-					target.call({});
-					value = false;
-				} catch (e) {
-					value = e instanceof TypeError;
-				}
-			}
-
-			// native getParameter is not a constructor, so anything new can build is a wrapper
-			if (value) {
-				try {
-					new target();
-					value = false;
-				} catch (e) {
-					value = e instanceof TypeError;
-				}
+				value = [() => target.call({}), () => new target()].every(item => {
+					let threw = false;
+					try {
+						item();
+					} catch (e) {
+						threw = e instanceof TypeError;
+					}
+					return threw;
+				});
 			}
 		}
 		return value;
