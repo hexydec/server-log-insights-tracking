@@ -40,7 +40,7 @@ export default async base => {
 				sent = true;
 				elapsed += performance.now() - loaded;
 				params.e = "navigate";
-				params.d = Math.floor(elapsed / 1000);
+				params.d = Math.round(elapsed / 1000); // rounded, as flooring loses half a second on every view
 				beacon(params);
 
 				// clear the link so it is not repeated on the next departure
